@@ -1,15 +1,16 @@
 
 BIN   	= tb
-SRC 	= tb.c
+SRC 	= main.c
 
-%.c: %.rl
-	ragel $<
+%.c: %.rl Makefile
+	ragel -T1 $<
+	ragel -Vp $< -Mmain | dot -Tjpg > tb.jpg
 
 PKG	+=
-CFLAGS  += -Wall -Werror -Wno-unused-const-variable
-CFLAGS	+= -O3 -MMD
+CFLAGS  += -Wall -Werror -Wno-unused-const-variable -Wno-unused-variable
+CFLAGS	+= -Os -MMD
 CFLAGS	+= -g
-LDFLAGS += -g
+LDFLAGS += -g -lm
 
 CFLAGS	+= $(shell pkg-config --cflags $(PKG))
 LDFLAGS	+= $(shell pkg-config --libs $(PKG))
@@ -24,6 +25,6 @@ $(BIN):	$(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
 
 clean:
-	rm -f $(OBJS) $(BIN) core main.c
+	rm -f $(OBJS) $(BIN) core main.c $(BIN).jpg
 
 -include $(DEPS)
