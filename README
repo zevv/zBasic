@@ -1,0 +1,5 @@
+
+$ sudo apt-get install ragel
+$ make
+$ ./tb < basic/mandel.bas
+
