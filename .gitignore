@@ -1,0 +1,6 @@
+main.c
+*.o
+*.d
+tb
+tb.jpg
+*.swp

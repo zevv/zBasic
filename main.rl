@@ -319,10 +319,12 @@ static struct var *var_find(bool create, const char *name, size_t len)
 	struct var *vfree = NULL;
 	for(i=0; i<MAX_VARS; i++) {
 		struct var *v = &var_list[i];
-		if(v->name[0] == '\0') {
-			vfree = v;
-		} else if(strncmp(v->name, name, len) == 0) {
+		if(len == strlen(v->name) &&
+			  strncmp(v->name, name, len) == 0) {
 			return v;
+		}
+		if(vfree == NULL && v->name[0] == '\0') {
+			vfree = v;
 		}
 	}
 
@@ -330,7 +332,7 @@ static struct var *var_find(bool create, const char *name, size_t len)
 		return NULL;
 	}
 
-	strncpy(vfree->name, name, sizeof(vfree->name));
+	strncpy(vfree->name, name, len);
 	return vfree;
 }
 
@@ -378,17 +380,13 @@ static val expr()
 static val expr_L()
 {
 	printd_in("expr_L");
-
 	val v = expr_C();
-	
 	while(tok == TOK_AND || tok == TOK_OR) {
 		printd("expr_L next");
 		if(next_is(TOK_AND)) v = expr_C() && v;
 		if(next_is(TOK_OR))  v = expr_C() || v;
 	}
-	
 	printd_out("expr_L -> %.14g", v);
-
 	return v;
 }
 
@@ -399,20 +397,15 @@ static val expr_L()
 static val expr_C()
 {
 	printd_in("expr");
-
 	val v = expr_E();
-	
 	printd("expr next");
-
 	     if(next_is(TOK_LT)) v = v <  expr_E();
 	else if(next_is(TOK_LE)) v = v <= expr_E();
 	else if(next_is(TOK_EQ)) v = v == expr_E();
 	else if(next_is(TOK_NE)) v = v != expr_E();
 	else if(next_is(TOK_GE)) v = v >= expr_E();
 	else if(next_is(TOK_GT)) v = v >  expr_E();
-	
 	printd_out("expr -> %.14g", v);
-
 	return v;
 }
 
@@ -424,17 +417,13 @@ static val expr_C()
 static val expr_E()
 {
 	printd_in("expr_E");
-
 	val v = expr_T();
-	
 	while(tok == TOK_PLUS || tok == TOK_MINUS) {
 		printd("expr_E next");
 		if(next_is(TOK_PLUS))  v += expr_T();
 		if(next_is(TOK_MINUS)) v -= expr_T();
 	}
-	
 	printd_out("expr_E -> %.14g", v);
-
 	return v;
 }
 
@@ -446,19 +435,14 @@ static val expr_E()
 static val expr_T()
 {
 	printd_in("expr_T");
-
 	val v = expr_F();
-	
 	printd("expr_T next");
-	
 	while(tok == TOK_MUL || tok == TOK_DIV || tok == TOK_MOD) {
 		if(next_is(TOK_MUL)) v *= expr_F();
 		if(next_is(TOK_DIV)) v /= expr_F();
 		if(next_is(TOK_MOD)) v = (int)v % (int)expr_F();
 	}
-
 	printd_out("expr_T -> %.14g", v);
-
 	return v;
 }
 
@@ -470,15 +454,10 @@ static val expr_T()
 static val expr_F()
 {
 	printd_in("expr_F");
-
 	val v = expr_P();
-	
 	printd("expr_F next");
-
 	if(next_is(TOK_POW)) v = pow(v, expr_F());
-
 	printd_out("expr_F -> %.14g", v);
-
 	return v;
 }
 
@@ -488,44 +467,30 @@ static val expr_F()
 static val expr_P()
 {
 	val v = 0;
-
 	printd_in("expr_P");
-
 	if(tok == TOK_NUMBER) {
 		v = cap_num;
 		next();
-	}
-
-	else if(tok == TOK_NAME) {
+	} else if(tok == TOK_NAME) {
 		struct var *var = var_find(false, ts, toklen);
 		if(var == NULL) error("unknown var");
 		next();
 		v = var->v;
-	}
-
-	else if(next_is(TOK_OPEN)) {
+	} else if(next_is(TOK_OPEN)) {
 		v = expr();
 		expect(TOK_CLOSE);
 		printd("After open");
-	}
-
-	else if(next_is(TOK_MINUS)) {
+	} else if(next_is(TOK_MINUS)) {
 		v = - expr_T();
-		printd("got minus %.14g", v);
-	}
-
-	else {
+	} else {
 		val (*fn)(void) = tokens[tok].fn;
 		if(fn == NULL) error("syntax error");
-		printd("found function");
 		next();
 		expect(TOK_OPEN);
 		v =  fn();
 		expect(TOK_CLOSE);
 	}
-
 	printd_out("expr_P -> %.14g", v);
-
 	return v;
 }
 	
@@ -553,13 +518,9 @@ static void jump_to(int linenum)
 static void statement()
 {
 	printd("statement");
-
 	if(tok == TOK_NAME) {
 		fn_assign();
-
-	}
-
-	else {
+	} else {
 		val (*fn)(void) = tokens[tok].fn;
 		if(fn) {
 			next();
@@ -718,14 +679,14 @@ static val fn_plot(void)
 {
 	static int colorcode[] = { 30, 34, 32, 36, 31, 35, 33, 37 };
 
-	val x = expr();
+	int x = expr();
 	expect(TOK_COMMA);
-	val y = expr();
+	int y = expr();
 	int color = 0;
 	struct var *var = var_find(false, "color", 5);
 	if(var) color = (int)var->v % 16;
 	
-	printf("\e[s\e[%d;%dH", (int)y, (int)x*2);
+	printf("\e[s\e[%d;%dH", y, x*2);
 	printf("\e[%d;%d;7m  \e[0m\e[u", color >= 8, colorcode[color % 8]);
 
 	fflush(stdout);
