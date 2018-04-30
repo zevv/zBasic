@@ -78,8 +78,8 @@ const struct token tokens[] = {
         [TOK_COLON] =   { ":" },
         [TOK_COMMA] =   { "," },
         [TOK_DIV] =     { "/" },
-        [TOK_EQ] =      { "=" },
-        [TOK_GE] =      { "==" },
+        [TOK_EQ] =      { "==" },
+        [TOK_GE] =      { ">=" },
         [TOK_GT] =      { ">" },
         [TOK_LE] =      { "<=" },
         [TOK_LT] =      { "<" },
@@ -118,8 +118,6 @@ const struct token tokens[] = {
 };
 
 #define NUM_TOKS (sizeof(tokens) / sizeof(tokens[0]))
-
-
 
 /* Parser state */
 
@@ -420,9 +418,7 @@ static val expr()
 }
 
 
-/* 
- *  L --> C {( "and" | "or" ) C}
- */
+/*  L --> C {( "and" | "or" ) C} */
 
 static val expr_L()
 {
@@ -437,9 +433,8 @@ static val expr_L()
 	return v;
 }
 
-/* 
- *  C --> E {( "<=" | "<" | "==" | "!=" | ">=" | ">") E}
- */
+
+/*  C --> E {( "<=" | "<" | "==" | "!=" | ">=" | ">") E} */
 
 static val expr_C()
 {
@@ -457,9 +452,7 @@ static val expr_C()
 }
 
 
-/* 
- *  E --> T {( "+" | "-" ) T}
- */
+/*  E --> T {( "+" | "-" ) T} */
 
 static val expr_E()
 {
@@ -475,9 +468,7 @@ static val expr_E()
 }
 
 
-/* 
- * T --> F {( "*" | "/" | "%") F}
- */
+/* T --> F {( "*" | "/" | "%") F} */
 
 static val expr_T()
 {
@@ -494,9 +485,7 @@ static val expr_T()
 }
 
 
-/* 
- * F --> P ["^" F]
- */
+/* F --> P ["^" F] */
 
 static val expr_F()
 {
