@@ -9,6 +9,7 @@
 #include <string.h>
 #include <setjmp.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <math.h>
 #include <stdbool.h>
 #include <ctype.h>
@@ -21,17 +22,19 @@
 %% write data;
 
 enum tok {
+	TOK_EOF,
+	TOK_NONE,
+
 	TOK_AND, TOK_ASSIGN, TOK_CLS, TOK_CLOSE, TOK_COLON, TOK_COMMA, TOK_DIV,
-	TOK_ELSE, TOK_END, TOK_EOF, TOK_EQ, TOK_FOR, TOK_GE, TOK_GOSUB,
-	TOK_GOTO, TOK_GT, TOK_IF, TOK_LE, TOK_LIST, TOK_LT, TOK_MINUS, TOK_MOD,
-	TOK_MUL, TOK_NE, TOK_NEXT, TOK_NONE, TOK_NUMBER, TOK_OPEN, TOK_OR,
-	TOK_PLOT, TOK_PLUS, TOK_POW, TOK_PRINT, TOK_QUIT, TOK_REM, TOK_RETURN,
-	TOK_RND, TOK_RUN, TOK_SQRT, TOK_SLEEP, TOK_STEP, TOK_STRING, TOK_THEN, TOK_TO,
-	TOK_NAME,
+	TOK_ELSE, TOK_END, TOK_EQ, TOK_FOR, TOK_GE, TOK_GOSUB, TOK_GOTO,
+	TOK_GT, TOK_IF, TOK_LE, TOK_LIST, TOK_LT, TOK_MINUS, TOK_MOD, TOK_MUL,
+	TOK_NE, TOK_NEXT, TOK_NUMBER, TOK_OPEN, TOK_OR, TOK_PLOT, TOK_PLUS,
+	TOK_POW, TOK_PRINT, TOK_QUIT, TOK_REM, TOK_RETURN, TOK_RND, TOK_RUN,
+	TOK_SQRT, TOK_SLEEP, TOK_STEP, TOK_STRING, TOK_THEN, TOK_TO, TOK_NAME,
 };
 
-typedef double val;
-
+typedef float val;
+#define VAL_FMT "%.4g"
 
 static val fn_print(void);
 static val fn_plot(void);
@@ -64,54 +67,54 @@ const struct token tokens[] = {
         [TOK_NAME] =    { "NAME" },
         [TOK_NONE] =    { "NONE" },
         [TOK_STRING] =  { "STRING" },
+        [TOK_EOF] =     { "EOF" },
+        [TOK_NUMBER] =  { "NUMBER" },
 
         /* Expression tokens */
 
-        [TOK_AND] =     { "AND" },
-        [TOK_ASSIGN] =  { "ASSIGN" },
-        [TOK_CLOSE] =   { "CLOSE" },
-        [TOK_COLON] =   { "COLON" },
-        [TOK_COMMA] =   { "COMMA" },
-        [TOK_DIV] =     { "DIV" },
-        [TOK_EOF] =     { "EOF" },
-        [TOK_EQ] =      { "EQ" },
-        [TOK_GE] =      { "GE" },
-        [TOK_GT] =      { "GT" },
-        [TOK_LE] =      { "LE" },
-        [TOK_LT] =      { "LT" },
-        [TOK_MINUS] =   { "MINUS" },
-        [TOK_MOD] =     { "MOD" },
-        [TOK_MUL] =     { "MUL" },
-        [TOK_NE] =      { "NE" },
-        [TOK_NUMBER] =  { "NUMBER" },
-        [TOK_OPEN] =    { "OPEN" },
-        [TOK_OR] =      { "OR" },
-        [TOK_PLUS] =    { "PLUS" },
-        [TOK_POW] =     { "POW" },
+        [TOK_AND] =     { "and" },
+        [TOK_ASSIGN] =  { "=" },
+        [TOK_CLOSE] =   { ")" },
+        [TOK_COLON] =   { ":" },
+        [TOK_COMMA] =   { "," },
+        [TOK_DIV] =     { "/" },
+        [TOK_EQ] =      { "=" },
+        [TOK_GE] =      { "==" },
+        [TOK_GT] =      { ">" },
+        [TOK_LE] =      { "<=" },
+        [TOK_LT] =      { "<" },
+        [TOK_MINUS] =   { "-" },
+        [TOK_MOD] =     { "%" },
+        [TOK_MUL] =     { "*" },
+        [TOK_NE] =      { "!=" },
+        [TOK_OPEN] =    { "(" },
+        [TOK_OR] =      { "or" },
+        [TOK_PLUS] =    { "+" },
+        [TOK_POW] =     { "^" },
 
         /* Statements and functions */
 
-        [TOK_CLS] =     { "CLS", fn_cls },
-        [TOK_END] =     { "END", fn_end },
-	[TOK_FOR] =     { "FOR", fn_for },
-	  [TOK_TO] =    { "TO" },
-	  [TOK_STEP] =  { "STEP" },
-        [TOK_NEXT] =    { "NEXT", fn_next },
-        [TOK_GOSUB] =   { "GOSUB", fn_gosub },
-        [TOK_GOTO] =    { "GOTO", fn_goto },
-        [TOK_IF] =      { "IF", fn_if },
-          [TOK_THEN] =  { "THEN" },
-          [TOK_ELSE] =  { "ELSE" },
-        [TOK_LIST] =    { "LIST", fn_list },
-        [TOK_PLOT] =    { "PLOT", fn_plot },
-        [TOK_PRINT] =   { "PRINT", fn_print },
-        [TOK_QUIT] =    { "QUIT", fn_quit },
-        [TOK_REM] =     { "REM", fn_rem },
-        [TOK_RETURN] =  { "RETURN", fn_return },
-        [TOK_RND] =     { "RND", fn_rnd },
-        [TOK_RUN] =     { "RUN", fn_run },
-        [TOK_SQRT] =    { "SQRT", fn_sqrt },
-        [TOK_SLEEP] =   { "SLEEP", fn_sleep },
+        [TOK_CLS] =     { "cls", fn_cls },
+        [TOK_END] =     { "end", fn_end },
+	[TOK_FOR] =     { "for", fn_for },
+	  [TOK_TO] =    { "to" },
+	  [TOK_STEP] =  { "step" },
+        [TOK_NEXT] =    { "next", fn_next },
+        [TOK_GOSUB] =   { "gosub", fn_gosub },
+        [TOK_GOTO] =    { "goto", fn_goto },
+        [TOK_IF] =      { "if", fn_if },
+          [TOK_THEN] =  { "then" },
+          [TOK_ELSE] =  { "else" },
+        [TOK_LIST] =    { "list", fn_list },
+        [TOK_PLOT] =    { "plot", fn_plot },
+        [TOK_PRINT] =   { "print", fn_print },
+        [TOK_QUIT] =    { "quit", fn_quit },
+        [TOK_REM] =     { "rem", fn_rem },
+        [TOK_RETURN] =  { "return", fn_return },
+        [TOK_RND] =     { "rnd", fn_rnd },
+        [TOK_RUN] =     { "run", fn_run },
+        [TOK_SQRT] =    { "sqrt", fn_sqrt },
+        [TOK_SLEEP] =   { "sleep", fn_sleep },
 };
 
 #define NUM_TOKS (sizeof(tokens) / sizeof(tokens[0]))
@@ -125,12 +128,12 @@ static enum tok tok;
 static const char *tokname = "";
 static size_t toklen;
 static int cs;
-static val cap_num;
+static val cur_num;
 static char *ts, *te;
 static char *p, *pe;
 static char *eof = NULL;
 static int act;
-
+static uint8_t *pc;
 
 /* Interpreter state */
 
@@ -138,6 +141,7 @@ static int act;
 #define LOOP_STACK_SIZE 8
 #define MAX_VARS 32
 #define MAX_VAR_LEN 5
+#define MAX_LINES 256
 
 struct var {
 	char name[MAX_VAR_LEN+1];
@@ -151,17 +155,22 @@ struct loop {
 	int line;
 };
 
+struct line {
+	uint8_t buf[64];
+};
+
+static struct line lines[MAX_LINES];
 static jmp_buf jmpbuf;
 static bool running = false;
 static struct var var_list[MAX_VARS];
-static char lines[256][80];
 static int call_stack[CALL_STACK_SIZE];
 static int call_head = 0;
 static struct loop loop_stack[LOOP_STACK_SIZE];
 static int loop_head = 0;
 static int cur_line;
+struct var *cur_var;
 static void statement();
-static void line(char *b);
+static void line(void);
 static int depth = 0;
 
 
@@ -191,11 +200,9 @@ static void vprintd(const char *fmt, va_list va)
 	printf("\e[30;1m");
 	i += vprintf(fmt, va);
 	for(; i<30; i++) printf(" ");
-	printf(" / %-10s", tokname);
+	printf(" | %-10s | ", tokname);
 	if(te > ts) {
-		printf(" / '");
 		fwrite(ts, te-ts, 1, stdout);
-		printf("'");
 	}
 	printf("\n\e[0m");
 }
@@ -233,11 +240,57 @@ static void printd(const char *fmt, ...)
 #define printd_out(...)
 #endif
 
+static struct var *var_find(const char *name, size_t len);
+static void next_compiled(void);
+static void next_text(void);
 
-static void next(void)
+
+/*
+ * Get next token, method depends on current running state
+ */
+
+static void next()
+{
+	(running ? next_compiled : next_text)();
+}
+
+
+/*
+ * Get next token from compiled line
+ */
+
+static void next_compiled(void)
+{
+	cur_var = NULL;
+	tok = *pc++;
+
+	if(tok == TOK_NUMBER) {
+		cur_num = *(float *)pc;
+		pc += sizeof(cur_num);
+	} else if(tok == TOK_NAME) {
+		cur_var = &var_list[*pc++];
+	} else if(tok == TOK_STRING) {
+		size_t len = *pc++;
+		ts = (char *)pc-1;
+		te = (char*)ts+len;
+		pc += len+1;
+	}
+	tokname = tokens[tok].name;
+	toklen = strlen(tokens[tok].name);
+}
+
+
+/*
+ * Get next token from text input
+ */
+
+static void next_text(void)
 {
 	tok = TOK_NONE;
-	cap_num = 0.;
+	cur_num = 0.;
+	cur_var = NULL;
+	tokname = NULL;
+	toklen = 0;
 
 	%%{
 		number = digit+ ( '.' digit+ )? ( [eE] ('+'|'-')? digit+ )?;
@@ -273,22 +326,19 @@ static void next(void)
 	}%%
 
 	while(tok == TOK_NONE) {
-
 		if(cs >= basic_first_final) {
 			tok = TOK_EOF;
 		}
-
 		if(cs == basic_error) {
 			error("parsing error");
 		}
-
 		%% write exec;
 	}
 
 	toklen = te-ts;
 
 	if(tok == TOK_NUMBER) {
-		cap_num = atof(ts);
+		cur_num = atof(ts);
 	}
 
 	if(tok == TOK_NAME) {
@@ -301,26 +351,25 @@ static void next(void)
 			}
 		}
 	}
+
+	if(tok == TOK_NAME) {
+		cur_var = var_find(ts, te-ts);
+	}
 	
 	tokname = tokens[tok].name;
 }
 
 
-static struct var *var_find(bool create, const char *name, size_t len)
+static struct var *var_find(const char *name, size_t len)
 {
-	printd("var find");
-
-	if(len > MAX_VAR_LEN) {
-		error("oversized var name");
-	}
+	if(len > MAX_VAR_LEN) error("var name too long");
 
 	int i;
-	struct var *v;
 	struct var *vfree = NULL;
 	for(i=0; i<MAX_VARS; i++) {
 		struct var *v = &var_list[i];
 		if(len == strlen(v->name) &&
-			  strncmp(v->name, name, len) == 0) {
+			  strncasecmp(v->name, name, len) == 0) {
 			return v;
 		}
 		if(vfree == NULL && v->name[0] == '\0') {
@@ -328,11 +377,9 @@ static struct var *var_find(bool create, const char *name, size_t len)
 		}
 	}
 
-	if(!create || !vfree) {
-		return NULL;
-	}
-
+	if(!vfree) error("out of var mem");
 	strncpy(vfree->name, name, len);
+	vfree->v = 0;
 	return vfree;
 }
 
@@ -386,7 +433,7 @@ static val expr_L()
 		if(next_is(TOK_AND)) v = expr_C() && v;
 		if(next_is(TOK_OR))  v = expr_C() || v;
 	}
-	printd_out("expr_L -> %.14g", v);
+	printd_out("expr_L -> " VAL_FMT, v);
 	return v;
 }
 
@@ -405,7 +452,7 @@ static val expr_C()
 	else if(next_is(TOK_NE)) v = v != expr_E();
 	else if(next_is(TOK_GE)) v = v >= expr_E();
 	else if(next_is(TOK_GT)) v = v >  expr_E();
-	printd_out("expr -> %.14g", v);
+	printd_out("expr -> " VAL_FMT, v);
 	return v;
 }
 
@@ -423,7 +470,7 @@ static val expr_E()
 		if(next_is(TOK_PLUS))  v += expr_T();
 		if(next_is(TOK_MINUS)) v -= expr_T();
 	}
-	printd_out("expr_E -> %.14g", v);
+	printd_out("expr_E -> " VAL_FMT, v);
 	return v;
 }
 
@@ -442,7 +489,7 @@ static val expr_T()
 		if(next_is(TOK_DIV)) v /= expr_F();
 		if(next_is(TOK_MOD)) v = (int)v % (int)expr_F();
 	}
-	printd_out("expr_T -> %.14g", v);
+	printd_out("expr_T -> " VAL_FMT, v);
 	return v;
 }
 
@@ -457,31 +504,33 @@ static val expr_F()
 	val v = expr_P();
 	printd("expr_F next");
 	if(next_is(TOK_POW)) v = pow(v, expr_F());
-	printd_out("expr_F -> %.14g", v);
+	printd_out("expr_F -> " VAL_FMT, v);
 	return v;
 }
 
 
-/* P --> v | "(" E ")" | "-" T */
+/* P --> v | "(" E ")" | "-" T | "+" T */
 
 static val expr_P()
 {
 	val v = 0;
 	printd_in("expr_P");
 	if(tok == TOK_NUMBER) {
-		v = cap_num;
+		v = cur_num;
 		next();
 	} else if(tok == TOK_NAME) {
-		struct var *var = var_find(false, ts, toklen);
-		if(var == NULL) error("unknown var");
+		if(!cur_var) error("no cur var");
+		v = cur_var->v;
+		printd("get from %s = " VAL_FMT, cur_var->name, v);
 		next();
-		v = var->v;
 	} else if(next_is(TOK_OPEN)) {
 		v = expr();
 		expect(TOK_CLOSE);
 		printd("After open");
 	} else if(next_is(TOK_MINUS)) {
 		v = - expr_T();
+	} else if(next_is(TOK_PLUS)) {
+		v = expr_T();
 	} else {
 		val (*fn)(void) = tokens[tok].fn;
 		if(fn == NULL) error("syntax error");
@@ -490,7 +539,7 @@ static val expr_P()
 		v =  fn();
 		expect(TOK_CLOSE);
 	}
-	printd_out("expr_P -> %.14g", v);
+	printd_out("expr_P -> " VAL_FMT, v);
 	return v;
 }
 	
@@ -498,7 +547,7 @@ static val expr_P()
 int find_next_line(int idx)
 {
 	for(idx++;idx<256; idx++) {
-		if(lines[idx][0]) {
+		if(lines[idx].buf[0] != TOK_EOF) {
 			return idx;
 		}
 	}
@@ -506,13 +555,13 @@ int find_next_line(int idx)
 }
 
 
-static void jump_to(int linenum)
+static void run_line(int n)
 {
-	cur_line = linenum;
-	printd(">> %d: %s", linenum, lines[linenum]);
-	line(lines[linenum]);
+	printd(">>> %d", n);
+	cur_line = n;
+	pc = lines[cur_line].buf;
+	line();
 }
-
 
 
 static void statement()
@@ -530,20 +579,57 @@ static void statement()
 }
 
 
-static void line(char *b)
+static void compile(void)
+{
+	int n = cur_num;
+	if(n < 0 || n > 255) error("line number out of range");
+	printd("%d ***", n);
+
+	struct line *l = &lines[n];
+	uint8_t *p = lines[n].buf;
+	uint8_t *pe = p + sizeof(lines[n]);
+
+	do {
+		next();
+		printd("> %3d: %s", p-lines[n].buf, tokname);
+		if(pe-p < 1) goto too_long;
+		*p++ = tok;
+		if(tok == TOK_NUMBER) {
+			if(pe-p < sizeof(cur_num)) goto too_long;
+			memcpy(p, &cur_num, sizeof(cur_num));
+			p += sizeof(cur_num);
+		} else if(tok == TOK_NAME) {
+			if(pe-p < 1) goto too_long;
+			int i = cur_var - var_list;
+			*p++ += i;
+		} else if(tok == TOK_STRING) {
+			size_t l = toklen-2;
+			if(pe-p < l+1) goto too_long;
+			*p++ = l;
+			char *str = (char *)p;
+			memcpy(p, ts+1, l);
+			p += l;
+			*p = '\0';
+			p ++;
+		}
+	} while(tok != TOK_EOF);
+	return;
+
+too_long:
+	error("line %d too long", n);
+}
+
+
+static void line(void)
 {
 	%% write init;
 	
-	p = b;
-	pe = p + strlen(p);
-		
 	next();
 
 	if(tok == TOK_NUMBER) {
-		int v = cap_num;
-		if(v < 0 || v > 255) error("line number out of range");
-		size_t n = 0;
-		strncpy(lines[v], te, sizeof(lines[v]));
+		if(!running) {
+			compile();
+		}
 	} else {
 		for(;;) {
 			statement();
@@ -571,7 +657,7 @@ static val fn_run()
 	int l = find_next_line(0);
 	running = true;
 	while(running && l != 0) {
-		jump_to(l);
+		run_line(l);
 		l = find_next_line(cur_line);
 	}
 	return 0;
@@ -584,7 +670,7 @@ static val fn_if()
 
 	expect(TOK_THEN);
 
-	printd("if expr = %.14g", v);
+	printd("if expr = " VAL_FMT, v);
 
 	if(v) {
 		statement();
@@ -609,7 +695,7 @@ static val fn_print(void)
 			next();
 		} else {
 			val v = expr();
-			printf("%.14g", v);
+			printf(VAL_FMT, v);
 		}
 	} while(next_is(TOK_COMMA));
 	printf("\n");
@@ -619,9 +705,9 @@ static val fn_print(void)
 
 static val fn_assign(void)
 {
-	struct var *var = var_find(true, ts, toklen);
-	if(var == NULL) error("no room for var");
+	struct var *var = cur_var;
 	next();
+	printd("assign to %s", var->name);
 	expect(TOK_ASSIGN);
 	var->v = expr();
 	return var->v;
@@ -631,7 +717,7 @@ static val fn_assign(void)
 static val fn_goto(void)
 {
 	int l = expr();
-	jump_to(l);
+	run_line(l);
 	return 0;
 }
 
@@ -641,7 +727,7 @@ static val fn_gosub()
 	if(call_head < CALL_STACK_SIZE-1) {
 		call_stack[call_head++] = cur_line;
 		int l = expr();
-		jump_to(l);
+		run_line(l);
 	}
 	return 0;
 }
@@ -667,8 +753,27 @@ static val fn_list(void)
 {
 	int i;
 	for(i=0; i<256; i++) {
-		if(lines[i][0]) {
-			printf("%d %s", i, lines[i]);
+		struct line *line = &lines[i];
+		uint8_t *p = line->buf;
+		if(*p != TOK_EOF) {
+			printf("%d ", i);
+			while(*p != TOK_EOF) {
+				if(*p == TOK_NUMBER) {
+					val v = *(float *)(p+1);
+					printf(VAL_FMT " ", v);
+					p += sizeof(float);
+				} else if(*p == TOK_NAME) {
+					printf("%s ", var_list[*(++p)].name);
+				} else if(*p == TOK_STRING) {
+					size_t len = *++p;
+					printf("\"%s\" ", p);
+					p += len + 1;
+				} else {
+					printf("%s ", tokens[*p].name);
+				}
+				p++;
+			}
+			printf("\n");
 		}
 	}
 	return 0;
@@ -683,7 +788,7 @@ static val fn_plot(void)
 	expect(TOK_COMMA);
 	int y = expr();
 	int color = 0;
-	struct var *var = var_find(false, "color", 5);
+	struct var *var = var_find("color", 5);
 	if(var) color = (int)var->v % 16;
 	
 	printf("\e[s\e[%d;%dH", y, x*2);
@@ -715,15 +820,17 @@ static val fn_for(void)
 	if(loop_head >= LOOP_STACK_SIZE) error("loop stack overflow");
 	if(cur_line == 0) error("not running");
 
-	struct var *var = var_find(true, ts, toklen);
+	if(tok != TOK_NAME) error("expected NAME");
+
 	struct loop *loop = &loop_stack[loop_head++];
 	loop->line = find_next_line(cur_line);
-	loop->var = var;
+	loop->var = cur_var;
 
 	next();
 	expect(TOK_ASSIGN);
 
-	var->v = expr();
+	loop->var->v = expr();
+
 	expect(TOK_TO);
 	loop->v_end = expr();
 	if(next_is(TOK_STEP)) {
@@ -731,6 +838,8 @@ static val fn_for(void)
 	} else {
 		loop->v_step = 1;
 	}
+	
+	printd("for on %s: " VAL_FMT " step " VAL_FMT, loop->var->name, loop->var->v, loop->v_step);
 
 	return 0;
 }
@@ -745,16 +854,19 @@ static val fn_next(void)
 	struct loop *loop = &loop_stack[loop_head-1];
 
 	if(tok == TOK_NAME) {
-		struct var *var = var_find(false, ts, toklen);
-		if(var != loop->var) error("for/next nesting mismatch");
+		if(cur_var != loop->var) error("for/next nesting mismatch");
 		next();
 	}
+	
 
 	struct var *var = loop->var;
+	printd("next on %s: " VAL_FMT, var->name, var->v);
 	var->v += loop->v_step;
+
+
 	if((loop->v_step > 0 && var->v <= loop->v_end) ||
 	   (loop->v_step < 0 && var->v >= loop->v_end)) {
-		jump_to(loop->line);
+		run_line(loop->line);
 	} else {
 		loop_head --;
 		loop_stack[loop_head].var = NULL;
@@ -795,7 +907,7 @@ static val fn_sqrt(void)
 
 int main(int argc, char **argv)
 {
-	static char inp[80];
+	static char inp[120];
 	srand(time(NULL));
 
 	//signal(SIGINT, on_sig);
@@ -804,7 +916,9 @@ int main(int argc, char **argv)
 
 		if(setjmp(jmpbuf) == 0) {
 			cur_line = 0;
-			line(inp);
+			p = inp;
+			pe = p + strlen(inp);
+			line();
 		} else {
 			running = false;
 		};
