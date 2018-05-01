@@ -272,10 +272,10 @@ static void next_compiled(void)
 		size_t len = *pc++;
 		ts = (char *)pc-1;
 		te = (char*)ts+len;
+		toklen = te - ts;
 		pc += len+1;
 	}
 	tokname = tokens[tok].name;
-	toklen = strlen(tokens[tok].name);
 }
 
 
@@ -300,6 +300,22 @@ static void next_text(void)
 			tok = TOK_COMMA;
 		} else if(*p == '/') {
 			tok = TOK_DIV;
+		} else if(*p == '-') {
+			tok = TOK_MINUS;
+		} else if(*p == '%') {
+			tok = TOK_MOD;
+		} else if(*p == '*') {
+			tok = TOK_MUL;
+		} else if(*p == '#') {
+			tok = TOK_NE;
+		} else if(*p == '(') {
+			tok = TOK_OPEN;
+		} else if(*p == '+') {
+			tok = TOK_PLUS;
+		} else if(*p == '^') {
+			tok = TOK_POW;
+		} else if(*p == '?') {
+			tok = TOK_PRINT;
 		} else if(*p == '=') {
 			if(*(p+1) == '=') {
 				p++;
@@ -321,36 +337,24 @@ static void next_text(void)
 			} else {
 				tok = TOK_LT;
 			}
-		} else if(*p == '-') {
-			tok = TOK_MINUS;
-		} else if(*p == '%') {
-			tok = TOK_MOD;
-		} else if(*p == '*') {
-			tok = TOK_MUL;
 		} else if(*p == '!') {
 			if(*(p+1) == '=') {
 				tok = TOK_NE;
 			} else {
 				error("syntax error");
 			}
-		} else if(*p == '#') {
-			tok = TOK_NE;
-		} else if(*p == '(') {
-			tok = TOK_OPEN;
-		} else if(*p == '+') {
-			tok = TOK_PLUS;
-		} else if(*p == '^') {
-			tok = TOK_POW;
-		} else if(*p == '?') {
-			tok = TOK_PRINT;
-		} else if(isdigit(*p)) {
+		} else if(isdigit(*p) || *p == '.') {
 			cur_num = atof(p);
 			while(isdigit(*p)) p++;
-			if(*p == '.') p++;
-			while(isdigit(*p)) p++;
-			if(*p == 'e' || *p == 'E') p++;
-			if(*p == '+' || *p == '-') p++;
-			while(isdigit(*p)) p++;
+			if(*p == '.') {
+				p++;
+				while(isdigit(*p)) p++;
+			}
+			if(*p == 'e' || *p == 'E') {
+				p++;
+				if(*p == '+' || *p == '-') p++;
+				while(isdigit(*p)) p++;
+			}
 			p--;
 			tok = TOK_NUMBER;
 		} else if(isalpha(*p)) {
@@ -372,10 +376,6 @@ static void next_text(void)
 
 	//printf("ts = '%s\n", ts);
 	//printf("te = '%s\n", te);
-
-	printf("  '");
-	fwrite(ts, te-ts, 1, stdout);
-	printf("'\n");
 
 	toklen = te-ts;
 
