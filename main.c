@@ -52,66 +52,62 @@ static val fn_sleep(void);
 static val fn_rnd(void);
 static val fn_sqrt(void);
 
-struct token {
-	const char *name;
-	val (*fn)(void);
-};
 
-const struct token tokens[] = {
+const char *tokens[] = {
 
         /* Generic tokens */
 
-        [TOK_NAME] =    { "NAME" },
-        [TOK_NONE] =    { "NONE" },
-        [TOK_STRING] =  { "STRING" },
-        [TOK_EOF] =     { "EOF" },
-        [TOK_NUMBER] =  { "NUMBER" },
+        [TOK_NAME] =    "NAME",
+        [TOK_NONE] =    "NONE",
+        [TOK_STRING] =  "STRING",
+        [TOK_EOF] =     "EOF",
+        [TOK_NUMBER] =  "NUMBER",
 
         /* Expression tokens */
 
-        [TOK_AND] =     { "and" },
-        [TOK_ASSIGN] =  { "=" },
-        [TOK_CLOSE] =   { ")" },
-        [TOK_COLON] =   { ":" },
-        [TOK_COMMA] =   { "," },
-        [TOK_DIV] =     { "/" },
-        [TOK_EQ] =      { "==" },
-        [TOK_GE] =      { ">=" },
-        [TOK_GT] =      { ">" },
-        [TOK_LE] =      { "<=" },
-        [TOK_LT] =      { "<" },
-        [TOK_MINUS] =   { "-" },
-        [TOK_MOD] =     { "%" },
-        [TOK_MUL] =     { "*" },
-        [TOK_NE] =      { "!=" },
-        [TOK_OPEN] =    { "(" },
-        [TOK_OR] =      { "or" },
-        [TOK_PLUS] =    { "+" },
-        [TOK_POW] =     { "^" },
+        [TOK_AND] =     "and",
+        [TOK_ASSIGN] =  "=",
+        [TOK_CLOSE] =   ")",
+        [TOK_COLON] =   ":",
+        [TOK_COMMA] =   ",",
+        [TOK_DIV] =     "/",
+        [TOK_EQ] =      "==",
+        [TOK_GE] =      ">=",
+        [TOK_GT] =      ">",
+        [TOK_LE] =      "<=",
+        [TOK_LT] =      "<",
+        [TOK_MINUS] =   "-",
+        [TOK_MOD] =     "%",
+        [TOK_MUL] =     "*",
+        [TOK_NE] =      "!=",
+        [TOK_OPEN] =    "(",
+        [TOK_OR] =      "or",
+        [TOK_PLUS] =    "+",
+        [TOK_POW] =     "^",
 
         /* Statements and functions */
 
-        [TOK_CLS] =     { "cls", fn_cls },
-        [TOK_END] =     { "end", fn_end },
-	[TOK_FOR] =     { "for", fn_for },
-	  [TOK_TO] =    { "to" },
-	  [TOK_STEP] =  { "step" },
-        [TOK_NEXT] =    { "next", fn_next },
-        [TOK_GOSUB] =   { "gosub", fn_gosub },
-        [TOK_GOTO] =    { "goto", fn_goto },
-        [TOK_IF] =      { "if", fn_if },
-          [TOK_THEN] =  { "then" },
-          [TOK_ELSE] =  { "else" },
-        [TOK_LIST] =    { "list", fn_list },
-        [TOK_PLOT] =    { "plot", fn_plot },
-        [TOK_PRINT] =   { "print", fn_print },
-        [TOK_QUIT] =    { "quit", fn_quit },
-        [TOK_REM] =     { "rem", fn_rem },
-        [TOK_RETURN] =  { "return", fn_return },
-        [TOK_RND] =     { "rnd", fn_rnd },
-        [TOK_RUN] =     { "run", fn_run },
-        [TOK_SQRT] =    { "sqrt", fn_sqrt },
-        [TOK_SLEEP] =   { "sleep", fn_sleep },
+        [TOK_CLS] =     "cls",
+        [TOK_END] =     "end",
+	[TOK_FOR] =     "for",
+	  [TOK_TO] =    "to",
+	  [TOK_STEP] =  "step",
+        [TOK_NEXT] =    "next",
+        [TOK_GOSUB] =   "gosub",
+        [TOK_GOTO] =    "goto",
+        [TOK_IF] =      "if",
+          [TOK_THEN] =  "then",
+          [TOK_ELSE] =  "else",
+        [TOK_LIST] =    "list",
+        [TOK_PLOT] =    "plot",
+        [TOK_PRINT] =   "print",
+        [TOK_QUIT] =    "quit",
+        [TOK_REM] =     "rem",
+        [TOK_RETURN] =  "return",
+        [TOK_RND] =     "rnd",
+        [TOK_RUN] =     "run",
+        [TOK_SQRT] =    "sqrt",
+        [TOK_SLEEP] =   "sleep",
 };
 
 #define NUM_TOKS (sizeof(tokens) / sizeof(tokens[0]))
@@ -164,7 +160,7 @@ static struct loop loop_stack[LOOP_STACK_SIZE];
 static int loop_head = 0;
 static int cur_line;
 struct var *cur_var;
-static void statement();
+static val statement();
 static void line(void);
 static int depth = 0;
 
@@ -275,13 +271,14 @@ static void next_compiled(void)
 		toklen = te - ts;
 		pc += len+1;
 	}
-	tokname = tokens[tok].name;
+	tokname = tokens[tok];
 }
 
 
 
 static void next_text(void)
 {
+	cur_var = NULL;
 	tok = TOK_NONE;
 
 	while(tok == TOK_NONE) {
@@ -292,31 +289,19 @@ static void next_text(void)
 		else if(*p == '\0' || *p == '\n' || *p == '\r') {
 			tok = TOK_EOF;
 		}
-		else if(*p == ')') {
-			tok = TOK_CLOSE;
-		} else if(*p == ':') {
-			tok = TOK_COLON;
-		} else if(*p == ',') {
-			tok = TOK_COMMA;
-		} else if(*p == '/') {
-			tok = TOK_DIV;
-		} else if(*p == '-') {
-			tok = TOK_MINUS;
-		} else if(*p == '%') {
-			tok = TOK_MOD;
-		} else if(*p == '*') {
-			tok = TOK_MUL;
-		} else if(*p == '#') {
-			tok = TOK_NE;
-		} else if(*p == '(') {
-			tok = TOK_OPEN;
-		} else if(*p == '+') {
-			tok = TOK_PLUS;
-		} else if(*p == '^') {
-			tok = TOK_POW;
-		} else if(*p == '?') {
-			tok = TOK_PRINT;
-		} else if(*p == '=') {
+		else if(*p == ')') { tok = TOK_CLOSE; }
+		else if(*p == ':') { tok = TOK_COLON; }
+		else if(*p == ',') { tok = TOK_COMMA; }
+		else if(*p == '/') { tok = TOK_DIV; }
+		else if(*p == '-') { tok = TOK_MINUS; }
+		else if(*p == '%') { tok = TOK_MOD; }
+		else if(*p == '*') { tok = TOK_MUL; }
+		else if(*p == '#') { tok = TOK_NE; }
+		else if(*p == '(') { tok = TOK_OPEN; }
+		else if(*p == '+') { tok = TOK_PLUS; }
+		else if(*p == '^') { tok = TOK_POW; }
+		else if(*p == '?') { tok = TOK_PRINT; }
+		else if(*p == '=') {
 			if(*(p+1) == '=') {
 				p++;
 				tok = TOK_EQ;
@@ -382,8 +367,8 @@ static void next_text(void)
 	if(tok == TOK_NAME) {
 		size_t i;
 		for(i=0; i<NUM_TOKS; i++) {
-			if(strlen(tokens[i].name) == toklen &&
-			   strncasecmp(tokens[i].name, ts, toklen) == 0) {
+			if(strlen(tokens[i]) == toklen &&
+			   strncasecmp(tokens[i], ts, toklen) == 0) {
 				tok = i;
 				break;
 			}
@@ -394,7 +379,7 @@ static void next_text(void)
 		cur_var = var_find(ts, te-ts);
 	}
 
-	tokname = tokens[tok].name;
+	tokname = tokens[tok];
 }
 
 
@@ -435,9 +420,9 @@ bool next_is(enum tok t)
 
 static void expect(enum tok t)
 {
-	printd("expect %s", tokens[t].name);
+	printd("expect %s", tokens[t]);
 	if(!next_is(t)) {
-		error("expected %s", tokens[t].name);
+		error("expected %s", tokens[t]);
 	}
 }
 
@@ -561,12 +546,7 @@ static val expr_P()
 	} else if(next_is(TOK_PLUS)) {
 		v = expr_T();
 	} else {
-		val (*fn)(void) = tokens[tok].fn;
-		if(fn == NULL) error("syntax error");
-		next();
-		expect(TOK_OPEN);
-		v =  fn();
-		expect(TOK_CLOSE);
+		v = statement();
 	}
 	printd_out("expr_P -> " VAL_FMT, v);
 	return v;
@@ -593,18 +573,31 @@ static void run_line(int n)
 }
 
 
-static void statement()
+static val statement()
 {
 	printd("statement");
 	if(tok == TOK_NAME) {
 		fn_assign();
-	} else {
-		val (*fn)(void) = tokens[tok].fn;
-		if(fn) {
-			next();
-			(void)fn();
-		}
-	}
+	} 
+	else if(next_is(TOK_CLS))    return fn_cls();
+        else if(next_is(TOK_END))    return fn_end();
+	else if(next_is(TOK_FOR))    return fn_for();
+        else if(next_is(TOK_NEXT))   return fn_next();
+        else if(next_is(TOK_GOSUB))  return fn_gosub();
+        else if(next_is(TOK_GOTO))   return fn_goto();
+        else if(next_is(TOK_IF))     return fn_if();
+        else if(next_is(TOK_LIST))   return fn_list();
+        else if(next_is(TOK_PLOT))   return fn_plot();
+        else if(next_is(TOK_PRINT))  return fn_print();
+        else if(next_is(TOK_QUIT))   return fn_quit();
+        else if(next_is(TOK_REM))    return fn_rem();
+        else if(next_is(TOK_RETURN)) return fn_return();
+        else if(next_is(TOK_RND))    return fn_rnd();
+        else if(next_is(TOK_RUN))    return fn_run();
+        else if(next_is(TOK_SQRT))   return fn_sqrt();
+        else if(next_is(TOK_SLEEP))  return fn_sleep();
+
+	return 0;
 }
 
 
@@ -796,7 +789,7 @@ static val fn_list(void)
 					printf("\"%s\" ", p);
 					p += len + 1;
 				} else {
-					printf("%s ", tokens[*p].name);
+					printf("%s ", tokens[*p]);
 				}
 				p++;
 			}
