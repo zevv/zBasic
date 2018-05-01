@@ -25,6 +25,6 @@ $(BIN):	$(OBJS)
 	$(LD) $(LDFLAGS) -o $@ $(OBJS)
 
 clean:
-	rm -f $(OBJS) $(BIN) core main.c $(BIN).jpg
+	rm -f $(OBJS) $(BIN) core $(BIN).jpg
 
 -include $(DEPS)

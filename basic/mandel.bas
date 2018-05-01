@@ -6,13 +6,13 @@
 5 gosub 100
 6 next
 7 next
-8 zoom = zoom * 1.05 
+8 zoom = zoom * 1.05
 10 if min > 1 then max = max * 1.1
 11 min = 15 : goto 2
 
 100 a = 0 : b = 0 : n = 0
-101 aa = a*a : bb = b*b 
-102 b = 2*a*b+y : a = aa-bb+x 
+101 aa = a*a : bb = b*b
+102 b = 2*a*b+y : a = aa-bb+x
 104 n = n + 1
 105 if n<max and aa+bb<4 then goto 101
 106 color = 16*n/max

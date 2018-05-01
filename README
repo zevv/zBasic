@@ -1,7 +1,6 @@
 
 A minimal BASIC interpreter for embedded environments.
 
-$ sudo apt-get install ragel
 $ make
 $ ./tb < basic/mandel.bas
 

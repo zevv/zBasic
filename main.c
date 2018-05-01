@@ -18,9 +18,6 @@
 
 //#define DEBUG
 
-%% machine basic;
-%% write data;
-
 enum tok {
 	TOK_EOF,
 	TOK_NONE,
@@ -214,7 +211,7 @@ static void printd_in(const char *fmt, ...)
 	vprintd(fmt, va);
 	va_end(va);
 }
-		
+
 static void printd_out(const char *fmt, ...)
 {
 	va_list va;
@@ -249,7 +246,11 @@ static void next_text(void);
 
 static void next()
 {
-	(running ? next_compiled : next_text)();
+	if(running) {
+		next_compiled();
+	} else {
+		next_text();
+	}
 }
 
 
@@ -278,66 +279,105 @@ static void next_compiled(void)
 }
 
 
-/*
- * Get next token from text input
- */
 
 static void next_text(void)
 {
 	tok = TOK_NONE;
-	cur_num = 0.;
-	cur_var = NULL;
-	tokname = NULL;
-	toklen = 0;
-
-	%%{
-		number = digit+ ( '.' digit+ )? ( [eE] ('+'|'-')? digit+ )?;
-		ws = [ \t\r\n]+;
-		string = '"' ([^"\\] | '\\"' | '\\\\') +  '"';
-
-		main := |*
-			ws        => {};
-			number    => { tok = TOK_NUMBER;  fbreak; };
-			'('       => { tok = TOK_OPEN;    fbreak; };
-			')'       => { tok = TOK_CLOSE;   fbreak; };
-			'+'       => { tok = TOK_PLUS;    fbreak; };
-			'-'       => { tok = TOK_MINUS;   fbreak; };
-			'%'       => { tok = TOK_MOD;     fbreak; };
-			':'       => { tok = TOK_COLON;   fbreak; };
-			'/'       => { tok = TOK_DIV;     fbreak; };
-			'^'       => { tok = TOK_POW;     fbreak; };
-			'*'       => { tok = TOK_MUL;     fbreak; };
-			'='       => { tok = TOK_ASSIGN;  fbreak; };
-			'<'       => { tok = TOK_LT;      fbreak; };
-			'<='      => { tok = TOK_LE;      fbreak; };
-			'=='      => { tok = TOK_EQ;      fbreak; };
-			'#'       => { tok = TOK_NE;      fbreak; };
-			'!='      => { tok = TOK_NE;      fbreak; };
-			'<>'      => { tok = TOK_NE;      fbreak; };
-			'>='      => { tok = TOK_GE;      fbreak; };
-			'>'       => { tok = TOK_GT;      fbreak; };
-			','       => { tok = TOK_COMMA;   fbreak; };
-			'?'       => { tok = TOK_PRINT;   fbreak; };
-			string    => { tok = TOK_STRING;  fbreak; };
-			alpha+    => { tok = TOK_NAME;    fbreak; };
-		*|;
-	}%%
 
 	while(tok == TOK_NONE) {
-		if(cs >= basic_first_final) {
+
+		ts = p;
+
+		     if(*p == ' ' || *p == '\t') { p++; }
+		else if(*p == '\0' || *p == '\n' || *p == '\r') {
 			tok = TOK_EOF;
 		}
-		if(cs == basic_error) {
-			error("parsing error");
+		else if(*p == ')') {
+			tok = TOK_CLOSE;
+		} else if(*p == ':') {
+			tok = TOK_COLON;
+		} else if(*p == ',') {
+			tok = TOK_COMMA;
+		} else if(*p == '/') {
+			tok = TOK_DIV;
+		} else if(*p == '=') {
+			if(*(p+1) == '=') {
+				p++;
+				tok = TOK_EQ;
+			} else {
+				tok = TOK_ASSIGN;
+			}
+		} else if(*p == '>') {
+			if(*(p+1) == '=') {
+				p++;
+				tok = TOK_GE;
+			} else {
+				tok = TOK_GT;
+			}
+		} else if(*p == '<') {
+			if(*(p+1) == '=') {
+				p++;
+				tok = TOK_LE;
+			} else {
+				tok = TOK_LT;
+			}
+		} else if(*p == '-') {
+			tok = TOK_MINUS;
+		} else if(*p == '%') {
+			tok = TOK_MOD;
+		} else if(*p == '*') {
+			tok = TOK_MUL;
+		} else if(*p == '!') {
+			if(*(p+1) == '=') {
+				tok = TOK_NE;
+			} else {
+				error("syntax error");
+			}
+		} else if(*p == '#') {
+			tok = TOK_NE;
+		} else if(*p == '(') {
+			tok = TOK_OPEN;
+		} else if(*p == '+') {
+			tok = TOK_PLUS;
+		} else if(*p == '^') {
+			tok = TOK_POW;
+		} else if(*p == '?') {
+			tok = TOK_PRINT;
+		} else if(isdigit(*p)) {
+			cur_num = atof(p);
+			while(isdigit(*p)) p++;
+			if(*p == '.') p++;
+			while(isdigit(*p)) p++;
+			if(*p == 'e' || *p == 'E') p++;
+			if(*p == '+' || *p == '-') p++;
+			while(isdigit(*p)) p++;
+			p--;
+			tok = TOK_NUMBER;
+		} else if(isalpha(*p)) {
+			ts = p;
+			while(isalpha(*(p+1))) p++;
+			te = p;
+			tok = TOK_NAME;
+		} else if(*p == '"') {
+			ts = p;
+			while(*p && *p != '"') p++;
+			te = p;
+			tok = TOK_STRING;
+		} else {
+			error("syntax error");
 		}
-		%% write exec;
 	}
+
+	te = ++p;
+
+	//printf("ts = '%s\n", ts);
+	//printf("te = '%s\n", te);
+
+	printf("  '");
+	fwrite(ts, te-ts, 1, stdout);
+	printf("'\n");
 
 	toklen = te-ts;
-
-	if(tok == TOK_NUMBER) {
-		cur_num = atof(ts);
-	}
 
 	if(tok == TOK_NAME) {
 		size_t i;
@@ -353,7 +393,7 @@ static void next_text(void)
 	if(tok == TOK_NAME) {
 		cur_var = var_find(ts, te-ts);
 	}
-	
+
 	tokname = tokens[tok].name;
 }
 
@@ -611,8 +651,6 @@ too_long:
 
 static void line(void)
 {
-	%% write init;
-	
 	next();
 
 	if(tok == TOK_NUMBER) {
