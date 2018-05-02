@@ -28,6 +28,8 @@ enum tok {
 	TOK_NE, TOK_NEXT, TOK_NUMBER, TOK_OPEN, TOK_OR, TOK_PLOT, TOK_PLUS,
 	TOK_POW, TOK_PRINT, TOK_QUIT, TOK_REM, TOK_RETURN, TOK_RND, TOK_RUN,
 	TOK_SQRT, TOK_SLEEP, TOK_STEP, TOK_STRING, TOK_THEN, TOK_TO, TOK_NAME,
+
+	NUM_TOKS,
 };
 
 typedef float val;
@@ -163,6 +165,7 @@ struct var *cur_var;
 static val statement();
 static void line(void);
 static int depth = 0;
+static int goto_line = 0;
 
 
 static void error(const char *fmt, ...)
@@ -201,20 +204,20 @@ static void vprintd(const char *fmt, va_list va)
 
 static void printd_in(const char *fmt, ...)
 {
-	depth ++;
 	va_list va;
 	va_start(va, fmt);
 	vprintd(fmt, va);
 	va_end(va);
+	depth ++;
 }
 
 static void printd_out(const char *fmt, ...)
 {
+	depth --;
 	va_list va;
 	va_start(va, fmt);
 	vprintd(fmt, va);
 	va_end(va);
-	depth --;
 }
 
 static void printd(const char *fmt, ...)
@@ -258,6 +261,7 @@ static void next_compiled(void)
 {
 	cur_var = NULL;
 	tok = *pc++;
+	ts = te = p;
 
 	if(tok == TOK_NUMBER) {
 		cur_num = *(float *)pc;
@@ -265,10 +269,10 @@ static void next_compiled(void)
 	} else if(tok == TOK_NAME) {
 		cur_var = &var_list[*pc++];
 	} else if(tok == TOK_STRING) {
-		size_t len = *pc++;
-		ts = (char *)pc-1;
+		size_t len = *pc;
+		ts = (char *)pc++;
 		te = (char*)ts+len;
-		toklen = te - ts;
+		toklen = te - ts + 2;
 		pc += len+1;
 	}
 	tokname = tokens[tok];
@@ -348,9 +352,11 @@ static void next_text(void)
 			te = p;
 			tok = TOK_NAME;
 		} else if(*p == '"') {
-			ts = p;
+			ts = p++;
 			while(*p && *p != '"') p++;
-			te = p;
+			p--;
+			if(!*p) error("unterminated string");
+			te = ++p;
 			tok = TOK_STRING;
 		} else {
 			error("syntax error");
@@ -358,9 +364,6 @@ static void next_text(void)
 	}
 
 	te = ++p;
-
-	//printf("ts = '%s\n", ts);
-	//printf("te = '%s\n", te);
 
 	toklen = te-ts;
 
@@ -437,6 +440,7 @@ static val expr_F();
 static val expr_P();
 
 
+
 static val expr()
 {
 	return expr_L();
@@ -502,8 +506,16 @@ static val expr_T()
 	printd("expr_T next");
 	while(tok == TOK_MUL || tok == TOK_DIV || tok == TOK_MOD) {
 		if(next_is(TOK_MUL)) v *= expr_F();
-		if(next_is(TOK_DIV)) v /= expr_F();
-		if(next_is(TOK_MOD)) v = (int)v % (int)expr_F();
+		if(next_is(TOK_DIV)) {
+			val v2 = expr_F();
+			if(v2 == 0) error("division by zero");
+			v = v / v2;
+		}
+		if(next_is(TOK_MOD)) {
+			int v2 = (int)expr_F();
+			if(v2 == 0) error("division by zero");
+			v = (int)v % v2;
+		}
 	}
 	printd_out("expr_T -> " VAL_FMT, v);
 	return v;
@@ -560,12 +572,15 @@ int find_next_line(int idx)
 			return idx;
 		}
 	}
+	error("no next line found");
 	return 0;
 }
 
 
 static void run_line(int n)
 {
+	if(n < 1 || n > 255) error("line number out of range");
+	if(lines[n].buf[0] == TOK_EOF) error("jump to empty line");
 	printd(">>> %d", n);
 	cur_line = n;
 	pc = lines[cur_line].buf;
@@ -608,12 +623,13 @@ static void compile(void)
 	printd("%d ***", n);
 
 	struct line *l = &lines[n];
-	uint8_t *p = lines[n].buf;
+	uint8_t *p =lines[n].buf;
+	uint8_t *q = p;
 	uint8_t *pe = p + sizeof(lines[n]);
 
 	do {
 		next();
-		printd("> %3d: %s", p-lines[n].buf, tokname);
+		printd("> %3d: %s %02x", p-lines[n].buf, tokname, tok);
 		if(pe-p < 1) goto too_long;
 		*p++ = tok;
 		if(tok == TOK_NUMBER) {
@@ -623,7 +639,7 @@ static void compile(void)
 		} else if(tok == TOK_NAME) {
 			if(pe-p < 1) goto too_long;
 			int i = cur_var - var_list;
-			*p++ += i;
+			*p++ = i;
 		} else if(tok == TOK_STRING) {
 			size_t l = toklen-2;
 			if(pe-p < l+1) goto too_long;
@@ -635,6 +651,9 @@ static void compile(void)
 			p ++;
 		}
 	} while(tok != TOK_EOF);
+
+	//while(q <= p) printf("%02x ", *q++);
+	//printf("\n");
 	return;
 
 too_long:
@@ -661,25 +680,25 @@ static void line(void)
 }
 
 
-void on_sig(int a)
-{
-	printf("\nBREAK");
-	running = false;
-}
-
-
 /*
  * Statement handlers
  */
 
 static val fn_run()
 {
+	if(running) error("nested run");
 	int l = find_next_line(0);
+
+	loop_head = 0;
+	call_head = 0;
+
 	running = true;
-	while(running && l != 0) {
+	do {
 		run_line(l);
-		l = find_next_line(cur_line);
-	}
+		if(!running) break;
+		l = goto_line ? goto_line : find_next_line(cur_line);
+		goto_line = 0;
+	} while(l != 0);
 	return 0;
 }
 
@@ -736,8 +755,7 @@ static val fn_assign(void)
 
 static val fn_goto(void)
 {
-	int l = expr();
-	run_line(l);
+	goto_line = expr();
 	return 0;
 }
 
@@ -882,7 +900,6 @@ static val fn_next(void)
 	struct var *var = loop->var;
 	printd("next on %s: " VAL_FMT, var->name, var->v);
 	var->v += loop->v_step;
-
 
 	if((loop->v_step > 0 && var->v <= loop->v_end) ||
 	   (loop->v_step < 0 && var->v >= loop->v_end)) {
