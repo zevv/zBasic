@@ -3,818 +3,960 @@
  * http://www.engr.mun.ca/~theo/Misc/exp_parsing.htm#classic
  */
 
+//#define DEBUG_RUN
+//#define DEBUG_LEX
+
+#ifndef DEBUG_RUN
+#define NDEBUG
+#endif
+
 #include <stdio.h>
 #include <signal.h>
 #include <time.h>
 #include <string.h>
 #include <setjmp.h>
+#include <assert.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <math.h>
 #include <stdbool.h>
-#include <ctype.h>
 #include <stdlib.h>
 #include <unistd.h>
 
-//#define DEBUG
+#define ZB_FMT_VAL "%.14g"
+#define ZB_FMT_IDX "%u"
+#define ZB_MEM_SIZE 2048
+#define ZB_VAR_NAME_LEN 7
+#define ZB_VAR_COUNT 32
+#define ZB_MAX_DEPTH 8
 
-enum tok {
-	TOK_EOF,
-	TOK_NONE,
-
-	TOK_AND, TOK_ASSIGN, TOK_CLS, TOK_CLOSE, TOK_COLON, TOK_COMMA, TOK_DIV,
-	TOK_ELSE, TOK_END, TOK_EQ, TOK_FOR, TOK_GE, TOK_GOSUB, TOK_GOTO,
-	TOK_GT, TOK_IF, TOK_LE, TOK_LIST, TOK_LT, TOK_MINUS, TOK_MOD, TOK_MUL,
-	TOK_NE, TOK_NEXT, TOK_NUMBER, TOK_OPEN, TOK_OR, TOK_PLOT, TOK_PLUS,
-	TOK_POW, TOK_PRINT, TOK_QUIT, TOK_REM, TOK_RETURN, TOK_RND, TOK_RUN,
-	TOK_SQRT, TOK_SLEEP, TOK_STEP, TOK_STRING, TOK_THEN, TOK_TO, TOK_NAME,
-
-	NUM_TOKS,
-};
+#define CSI "\033["
 
 typedef float val;
-#define VAL_FMT "%.4g"
+typedef uint32_t idx;
 
-static val fn_print(void);
-static val fn_plot(void);
-static val fn_if(void);
-static val fn_gosub(void);
-static val fn_goto(void);
-static val fn_rem(void);
-static val fn_return(void);
-static val fn_cls(void);
-static val fn_list(void);
-static val fn_end(void);
-static val fn_for(void);
-static val fn_next(void);
-static val fn_quit(void);
-static val fn_run(void);
-static val fn_assign(void);
-static val fn_sleep(void);
-static val fn_rnd(void);
-static val fn_sqrt(void);
+static void printd(const char *fmt, ...);
 
-
-const char *tokens[] = {
-
-        /* Generic tokens */
-
-        [TOK_NAME] =    "NAME",
-        [TOK_NONE] =    "NONE",
-        [TOK_STRING] =  "STRING",
-        [TOK_EOF] =     "EOF",
-        [TOK_NUMBER] =  "NUMBER",
-
-        /* Expression tokens */
-
-        [TOK_AND] =     "and",
-        [TOK_ASSIGN] =  "=",
-        [TOK_CLOSE] =   ")",
-        [TOK_COLON] =   ":",
-        [TOK_COMMA] =   ",",
-        [TOK_DIV] =     "/",
-        [TOK_EQ] =      "==",
-        [TOK_GE] =      ">=",
-        [TOK_GT] =      ">",
-        [TOK_LE] =      "<=",
-        [TOK_LT] =      "<",
-        [TOK_MINUS] =   "-",
-        [TOK_MOD] =     "%",
-        [TOK_MUL] =     "*",
-        [TOK_NE] =      "!=",
-        [TOK_OPEN] =    "(",
-        [TOK_OR] =      "or",
-        [TOK_PLUS] =    "+",
-        [TOK_POW] =     "^",
-
-        /* Statements and functions */
-
-        [TOK_CLS] =     "cls",
-        [TOK_END] =     "end",
-	[TOK_FOR] =     "for",
-	  [TOK_TO] =    "to",
-	  [TOK_STEP] =  "step",
-        [TOK_NEXT] =    "next",
-        [TOK_GOSUB] =   "gosub",
-        [TOK_GOTO] =    "goto",
-        [TOK_IF] =      "if",
-          [TOK_THEN] =  "then",
-          [TOK_ELSE] =  "else",
-        [TOK_LIST] =    "list",
-        [TOK_PLOT] =    "plot",
-        [TOK_PRINT] =   "print",
-        [TOK_QUIT] =    "quit",
-        [TOK_REM] =     "rem",
-        [TOK_RETURN] =  "return",
-        [TOK_RND] =     "rnd",
-        [TOK_RUN] =     "run",
-        [TOK_SQRT] =    "sqrt",
-        [TOK_SLEEP] =   "sleep",
-};
-
-#define NUM_TOKS (sizeof(tokens) / sizeof(tokens[0]))
-
-/* Parser state */
-
-static char *buf;
-static enum tok tok;
-static const char *tokname = "";
-static size_t toklen;
-static int cs;
-static val cur_num;
-static char *ts, *te;
-static char *p, *pe;
-static char *eof = NULL;
-static int act;
-static uint8_t *pc;
-
-/* Interpreter state */
-
-#define CALL_STACK_SIZE 16
-#define LOOP_STACK_SIZE 8
-#define MAX_VARS 32
-#define MAX_VAR_LEN 5
-#define MAX_LINES 256
+#define VAR_TYPE_VAL 0
+#define VAR_TYPE_CFUNC 1
 
 struct var {
-	char name[MAX_VAR_LEN+1];
-	val v;
+	char name[ZB_VAR_NAME_LEN+1];
+	uint8_t type;
+	union {
+		val v;
+		idx i;
+		val (*fn)(void);
+	};
 };
 
 struct loop {
 	struct var *var;
-	val v_step;
-	val v_end;
-	int line;
+	idx ptr_start;
+	val v_end, v_step;
 };
 
-struct line {
-	uint8_t buf[64];
+typedef enum {
+	E_SYNTAX_ERROR, E_VAR_MEM_FULL, E_UNTERM_STR, E_MEM_FULL,
+	E_EXPECTED, E_DIV_BY_ZERO, E_NESTED_RUN, E_LINE_NOT_FOUND,
+	E_STACK_OVERFLOW, E_NEXT_WITHOUT_FOR, E_ASSERT, E_NOT_LVALUE,
+} zb_err;
+
+typedef enum {
+
+	/* Operators */
+
+	TOK_ASSIGN, TOK_MINUS, TOK_PLUS, TOK_MUL, TOK_DIV, TOK_MOD, TOK_LT,
+	TOK_LE, TOK_EQ, TOK_NE, TOK_GE, TOK_GT, TOK_POW, TOK_AND, TOK_OR,
+	TOK_BAND, TOK_BOR, TOK_BXOR, TOK_NOT, TOK_BNOT,
+
+	/* Keywords */
+
+	TOK_ELSE, TOK_FOR, TOK_GOSUB, TOK_GOTO, TOK_IF, TOK_NEXT,
+	TOK_RETURN, TOK_RUN, TOK_THEN, TOK_TO, TOK_PRINT, TOK_END, TOK_STEP,
+	TOK_COLON, TOK_OPEN, TOK_CLOSE, TOK_SEMI, TOK_COMMA,
+
+	/* Other */
+
+	TOK_CHUNK, TOK_LIT, TOK_VAR, TOK_STR, TOK_NONE, TOK_EOF,
+
+	NUM_TOKENS
+} zb_tok;
+
+#define OPERATOR_COUNT (TOK_BNOT+1)
+
+#define _ "\0"
+
+static const char tokstr[] =
+
+	"=" _ "-" _ "+" _ "*" _ "/" _ "%" _ "<" _ "<=" _ "==" _ "<>" _ ">=" _
+	">" _ "**" _ "and" _ "or" _ "&" _ "|" _ "^" _ "!" _ "~" _
+
+	"else" _ "for" _ "gosub" _ "goto" _ "if" _ "next" _ "return" _
+	"run" _ "then" _ "to" _ "print" _ "end" _ "step" _ ":" _ 
+	"("_ ")" _ ";" _ "," _
+
+	"CHU" _ "LIT" _ "VAR" _ "STR" _ "NON" _ "EOF";
+
+static const char *errmsg[] = {
+	[E_SYNTAX_ERROR] = "Syntax error",
+	[E_VAR_MEM_FULL] = "Too many variables",
+	[E_UNTERM_STR] = "Unterminated string",
+	[E_MEM_FULL] = "Pool full",
+	[E_EXPECTED] = "Expected",
+	[E_DIV_BY_ZERO] = "Division by zero",
+	[E_NESTED_RUN] = "Nested run",
+	[E_LINE_NOT_FOUND] = "Line not found",
+	[E_STACK_OVERFLOW] = "Stack overflow",
+	[E_NEXT_WITHOUT_FOR] = "Next without for",
+	[E_ASSERT] = "Assert failed",
+	[E_NOT_LVALUE] = "Not an lvalue",
 };
 
-static struct line lines[MAX_LINES];
+
+static struct var vars[ZB_VAR_COUNT];
+static uint8_t mem[ZB_MEM_SIZE];
+static idx cur = 0, end = 0;
 static jmp_buf jmpbuf;
 static bool running = false;
-static struct var var_list[MAX_VARS];
-static int call_stack[CALL_STACK_SIZE];
-static int call_head = 0;
-static struct loop loop_stack[LOOP_STACK_SIZE];
-static int loop_head = 0;
-static int cur_line;
-struct var *cur_var;
-static val statement();
-static void line(void);
-static int depth = 0;
-static int goto_line = 0;
+static struct loop loop_stack[ZB_MAX_DEPTH];
+static idx loop_head;
 
 
-static void error(const char *fmt, ...)
+static void error(zb_err e, const char *ctx)
 {
-	va_list va;
-	printf("\e[31;1m");
-	va_start(va, fmt);
-	if(running) {
-		printf("Error at line %d: ", cur_line);
-	} else {
-		printf("Error: ");
-	}
-	vprintf(fmt, va);
-	printf("\n");
-	va_end(va);
-	printf("\e[0m");
+	const char *msg = errmsg[e];
+	if(!ctx) ctx = "";
+	fprintf(stderr, CSI "31m%s %s\033[0m\n", msg, ctx);
 	longjmp(jmpbuf, 1);
 }
 
-#ifdef DEBUG
 
-static void vprintd(const char *fmt, va_list va)
+#define error_if(exp, e, msg) { if(exp) error(e, msg); }
+
+
+static const char *tokname(idx i)
+{
+	idx j = 0;
+	if(i >= NUM_TOKENS) return "?";
+	const char *p = tokstr;
+	for(j=0; j<i; j++) while(*p++);
+	return p;
+}
+
+
+static bool match(const char *p, const char *s, size_t len)
+{
+	size_t i;
+	for(i=0; i<len; i++) {
+		if(*p++ != *s++) return false;
+	}
+	return *p == '\0';
+}
+
+
+static zb_tok find_tok(const char *name, size_t len)
+{
+	const char *p = tokstr;
+	zb_tok i;
+	for(i=0; i<NUM_TOKENS; i++) {
+		if(match(p, name, len)) return i;
+		while(*p++);
+	}
+	return TOK_NONE;
+}
+
+
+static void dump_vars(void)
 {
 	int i;
-	for(i=0; i<depth; i++) printf(" ");
-	printf("\e[30;1m");
-	i += vprintf(fmt, va);
-	for(; i<30; i++) printf(" ");
-	printf(" | %-10s | ", tokname);
-	if(te > ts) {
-		fwrite(ts, te-ts, 1, stdout);
-	}
-	printf("\n\e[0m");
-}
-
-
-static void printd_in(const char *fmt, ...)
-{
-	va_list va;
-	va_start(va, fmt);
-	vprintd(fmt, va);
-	va_end(va);
-	depth ++;
-}
-
-static void printd_out(const char *fmt, ...)
-{
-	depth --;
-	va_list va;
-	va_start(va, fmt);
-	vprintd(fmt, va);
-	va_end(va);
-}
-
-static void printd(const char *fmt, ...)
-{
-	va_list va;
-	va_start(va, fmt);
-	vprintd(fmt, va);
-	va_end(va);
-}
-
-#else
-#define printd(...)
-#define printd_in(...)
-#define printd_out(...)
-#endif
-
-static struct var *var_find(const char *name, size_t len);
-static void next_compiled(void);
-static void next_text(void);
-
-
-/*
- * Get next token, method depends on current running state
- */
-
-static void next()
-{
-	if(running) {
-		next_compiled();
-	} else {
-		next_text();
-	}
-}
-
-
-/*
- * Get next token from compiled line
- */
-
-static void next_compiled(void)
-{
-	cur_var = NULL;
-	tok = *pc++;
-	ts = te = p;
-
-	if(tok == TOK_NUMBER) {
-		cur_num = *(float *)pc;
-		pc += sizeof(cur_num);
-	} else if(tok == TOK_NAME) {
-		cur_var = &var_list[*pc++];
-	} else if(tok == TOK_STRING) {
-		size_t len = *pc;
-		ts = (char *)pc++;
-		te = (char*)ts+len;
-		toklen = te - ts + 2;
-		pc += len+1;
-	}
-	tokname = tokens[tok];
-}
-
-
-
-static void next_text(void)
-{
-	cur_var = NULL;
-	tok = TOK_NONE;
-
-	while(tok == TOK_NONE) {
-
-		ts = p;
-
-		     if(*p == ' ' || *p == '\t') { p++; }
-		else if(*p == '\0' || *p == '\n' || *p == '\r') {
-			tok = TOK_EOF;
+	for(i=0; i<ZB_VAR_COUNT; i++) {
+		struct var *var = &vars[i];
+		if(var->name[0] == 0) continue;
+		if(var->type == VAR_TYPE_VAL) {
+			printf("  %d: %s = " ZB_FMT_VAL "\n", i, var->name, var->v);
 		}
-		else if(*p == ')') { tok = TOK_CLOSE; }
-		else if(*p == ':') { tok = TOK_COLON; }
-		else if(*p == ',') { tok = TOK_COMMA; }
-		else if(*p == '/') { tok = TOK_DIV; }
-		else if(*p == '-') { tok = TOK_MINUS; }
-		else if(*p == '%') { tok = TOK_MOD; }
-		else if(*p == '*') { tok = TOK_MUL; }
-		else if(*p == '#') { tok = TOK_NE; }
-		else if(*p == '(') { tok = TOK_OPEN; }
-		else if(*p == '+') { tok = TOK_PLUS; }
-		else if(*p == '^') { tok = TOK_POW; }
-		else if(*p == '?') { tok = TOK_PRINT; }
-		else if(*p == '=') {
-			if(*(p+1) == '=') {
-				p++;
-				tok = TOK_EQ;
+		if(var->type == VAR_TYPE_CFUNC) {
+			printf("  %d: %s = CFUNC\n", i, var->name);
+		}
+	}
+}
+
+
+static idx find_var(const char *name, size_t len)
+{
+	if(len > ZB_VAR_NAME_LEN) len = ZB_VAR_NAME_LEN;
+	idx i, ifree=ZB_VAR_COUNT;
+	for(i=0; i<ZB_VAR_COUNT; i++) {
+		if(match(vars[i].name, name, len)) {
+			return i;
+		}
+		if(ifree == ZB_VAR_COUNT && vars[i].name[0] == '\0') {
+			ifree = i;
+		}
+	}
+	error_if(ifree == ZB_VAR_COUNT, E_VAR_MEM_FULL, NULL);
+	strncpy(vars[ifree].name, name, len);
+	printd("var alloc " ZB_FMT_IDX " -> %s at ", i, vars[ifree].name);
+	return ifree;
+}
+
+
+static void put_buf(const void *buf, size_t len)
+{
+	error_if(end + len >= ZB_MEM_SIZE, E_MEM_FULL, NULL);
+
+	memcpy(mem+end, buf, len);
+	end += len;
+
+}
+
+
+static void put_tok(uint8_t c)
+{
+	put_buf(&c, 1);
+}
+
+
+static void put_lit(val v)
+{
+	put_tok(TOK_LIT);
+	int vi = v;
+	uint8_t b[1 + sizeof(val)];
+	size_t n=0;
+	if(v == vi && vi < 128) {
+		b[0] = vi;
+		n = 1;
+	} else if(v == vi && vi < 32512) {
+		b[0] = (vi >> 8) | 0x80;
+		b[1] = vi & 0xff;
+		n = 2;
+	} else {
+		b[0] = 0xff;
+		*(val *)(&b[1]) = v;
+		n = 1 + sizeof(val);
+	}
+	put_buf(b, n);
+}
+
+
+static void put_var(idx i)
+{
+	uint8_t b[2] = { TOK_VAR, i };
+	put_buf(b, sizeof(b));
+}
+
+
+static void put_str(const char *src, size_t len)
+{
+	put_tok(TOK_STR);
+	put_tok(len);
+	put_buf(src, len);
+	put_tok('\0');
+}
+
+
+static void put_chunk(void)
+{
+	uint8_t buf[4] = { TOK_CHUNK, 0, 0, 0 };
+	put_buf(buf, sizeof(buf));
+}
+
+
+static void set_chunk_len(idx ptr, idx len)
+{
+	mem[ptr+1] = len;
+}
+
+
+static void set_chunk_line(idx ptr, idx line)
+{
+	mem[ptr+2] = line >> 8;
+	mem[ptr+3] = line & 0xff;
+}
+
+
+static bool is_digit(char c)
+  { return c >= '0' && c <= '9'; }
+
+static bool is_alpha(char c)
+  { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'); }
+
+static bool is_alnum(char c)
+  { return is_alpha(c) || is_digit(c); }
+
+static bool is_hexdigit(char c)
+  { return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
+
+static bool lex(const char *line)
+{
+	idx start = end;
+	const char *p = line;
+	bool first = true;
+	bool exec = true;
+
+	put_chunk();
+
+	for(;;) {
+
+		while(*p == ' ' || *p == '\t' || *p == '\r') p++;
+		const char *q = p;
+		idx prev = end;
+
+		if(*p == '\n' || *p == '\0') {
+			put_tok(TOK_EOF);
+			break;
+		} else if(is_digit(*p)) {
+			val v = atof(p);
+			if(first) {
+				set_chunk_line(start, v);
+				exec = false;
 			} else {
-				tok = TOK_ASSIGN;
+				put_lit(v);
 			}
-		} else if(*p == '>') {
-			if(*(p+1) == '=') {
-				p++;
-				tok = TOK_GE;
+			if(*p == '0' && *(p+1) == 'x') {
+				p+=2;
+				while(is_hexdigit(*p)) p++;
 			} else {
-				tok = TOK_GT;
+				while(is_alnum(*p)) p++;
+				if(*p == '.') p++;
+				while(is_alnum(*p)) p++;
+			}
+			p--;
+		} else if(is_alpha(*p)) {
+			const char *ps = p;
+			while(is_alnum(*p) || *p == '$') p++;
+			zb_tok tok = find_tok(ps, p-ps);
+			if(tok == TOK_NONE) {
+				put_var(find_var(ps, p-ps));
+			} else {
+				put_tok(tok);
+			}
+			p--;
+		} else if(*p == '"') {
+			const char *ps = ++p;
+			while(*p != '"') {
+				error_if(*p == '\0', E_UNTERM_STR, NULL);
+				p++;
+			}
+			put_str(ps, p-ps);
+		} else if(*p == '\'') {
+			p++;
+			put_lit(*p++);
+			if(*p != '\'') error(E_UNTERM_STR, NULL);
+		} else if(*p == '=') {
+			if(*(p+1) == '=') {
+				put_tok(TOK_EQ);
+				p++;
+			} else {
+				put_tok(TOK_ASSIGN);
 			}
 		} else if(*p == '<') {
 			if(*(p+1) == '=') {
+				put_tok(TOK_LE);
 				p++;
-				tok = TOK_LE;
+			} else if(*(p+1) == '>') {
+				put_tok(TOK_NE);
+				p++;
 			} else {
-				tok = TOK_LT;
+				put_tok(TOK_LT);
+			}
+		} else if(*p == '>') {
+			if(*(p+1) == '=') {
+				put_tok(TOK_GE);
+				p++;
+			} else {
+				put_tok(TOK_GT);
+			}
+		} else if(*p == '*') {
+			if(*(p+1) == '*') {
+				put_tok(TOK_POW);
+				p++;
+			} else {
+				put_tok(TOK_MUL);
 			}
 		} else if(*p == '!') {
 			if(*(p+1) == '=') {
-				tok = TOK_NE;
+				put_tok(TOK_NE);
+				p++;
 			} else {
-				error("syntax error");
+				put_tok(TOK_NOT);
 			}
-		} else if(isdigit(*p) || *p == '.') {
-			cur_num = atof(p);
-			while(isdigit(*p)) p++;
-			if(*p == '.') {
-				p++;
-				while(isdigit(*p)) p++;
-			}
-			if(*p == 'e' || *p == 'E') {
-				p++;
-				if(*p == '+' || *p == '-') p++;
-				while(isdigit(*p)) p++;
-			}
-			p--;
-			tok = TOK_NUMBER;
-		} else if(isalpha(*p)) {
-			ts = p;
-			while(isalpha(*(p+1))) p++;
-			te = p;
-			tok = TOK_NAME;
-		} else if(*p == '"') {
-			ts = p++;
-			while(*p && *p != '"') p++;
-			p--;
-			if(!*p) error("unterminated string");
-			te = ++p;
-			tok = TOK_STRING;
-		} else {
-			error("syntax error");
 		}
-	}
+		else if(*p == ':') put_tok(TOK_COLON);
+		else if(*p == '-') put_tok(TOK_MINUS);
+		else if(*p == '+') put_tok(TOK_PLUS);
+		else if(*p == '&') put_tok(TOK_BAND);
+		else if(*p == '|') put_tok(TOK_BOR);
+		else if(*p == '^') put_tok(TOK_BXOR);
+		else if(*p == '~') put_tok(TOK_BNOT);
+		else if(*p == '%') put_tok(TOK_MOD);
+		else if(*p == '^') put_tok(TOK_POW);
+		else if(*p == '(') put_tok(TOK_OPEN);
+		else if(*p == ')') put_tok(TOK_CLOSE);
+		else if(*p == '/') put_tok(TOK_DIV);
+		else if(*p == '/') put_tok(TOK_MOD);
+		else if(*p == ',') put_tok(TOK_COMMA);
+		else if(*p == ';') put_tok(TOK_SEMI);
+		else error(E_SYNTAX_ERROR, p);
 
-	te = ++p;
+		p++;
 
-	toklen = te-ts;
-
-	if(tok == TOK_NAME) {
+#ifdef DEBUG_LEX
+		if(first) putchar('\n');
+		printf(CSI "36m%5d | ", (int)prev);
+		size_t l = fwrite(q, 1, p-q, stdout);
+		for(;l<10; l++) putchar(' ');
+		printf(" | ");
 		size_t i;
-		for(i=0; i<NUM_TOKS; i++) {
-			if(strlen(tokens[i]) == toklen &&
-			   strncasecmp(tokens[i], ts, toklen) == 0) {
-				tok = i;
-				break;
-			}
-		}
+		for(i=0; i<end-prev; i++) printf("%02x ", mem[prev+i]);
+		printf(CSI "0m\n");
+#endif
+		first = false;
 	}
 
-	if(tok == TOK_NAME) {
-		cur_var = var_find(ts, te-ts);
-	}
+	set_chunk_len(start, end - start);
 
-	tokname = tokens[tok];
+	return exec;
 }
 
 
-static struct var *var_find(const char *name, size_t len)
+static zb_tok cur_tok(void)
 {
-	if(len > MAX_VAR_LEN) error("var name too long");
-
-	int i;
-	struct var *vfree = NULL;
-	for(i=0; i<MAX_VARS; i++) {
-		struct var *v = &var_list[i];
-		if(len == strlen(v->name) &&
-			  strncasecmp(v->name, name, len) == 0) {
-			return v;
-		}
-		if(vfree == NULL && v->name[0] == '\0') {
-			vfree = v;
-		}
-	}
-
-	if(!vfree) error("out of var mem");
-	strncpy(vfree->name, name, len);
-	vfree->v = 0;
-	return vfree;
+	assert(cur < ZB_MEM_SIZE);
+	return (zb_tok)mem[cur];
 }
 
 
-bool next_is(enum tok t)
+static bool cur_is(zb_tok tok)
 {
-	if(tok == t) {
-		next();
+	return cur_tok() == tok;
+}
+
+
+static bool next_is(zb_tok tok)
+{
+	if(cur_tok() == tok) {
+		cur++;
 		return true;
+	}
+	return false;
+}
+
+
+static void expect(zb_tok tok)
+{
+	error_if(!next_is(tok), E_EXPECTED, tokname(tok));
+}
+
+
+static val get_lit(void)
+{
+	printd("get_lit");
+	val v = 0;
+	expect(TOK_LIT);
+	uint8_t b0 = mem[cur++];
+	if(b0 == 0xff) {
+		v = *(val *)(mem+cur);
+		cur += sizeof(val);
 	} else {
-		return false;
-	}
-}
-
-
-static void expect(enum tok t)
-{
-	printd("expect %s", tokens[t]);
-	if(!next_is(t)) {
-		error("expected %s", tokens[t]);
-	}
-}
-
-
-
-static val expr();
-static val expr_L();
-static val expr_E();
-static val expr_T();
-static val expr_C();
-static val expr_F();
-static val expr_P();
-
-
-
-static val expr()
-{
-	return expr_L();
-}
-
-
-/*  L --> C {( "and" | "or" ) C} */
-
-static val expr_L()
-{
-	printd_in("expr_L");
-	val v = expr_C();
-	while(tok == TOK_AND || tok == TOK_OR) {
-		printd("expr_L next");
-		if(next_is(TOK_AND)) v = expr_C() && v;
-		if(next_is(TOK_OR))  v = expr_C() || v;
-	}
-	printd_out("expr_L -> " VAL_FMT, v);
-	return v;
-}
-
-
-/*  C --> E {( "<=" | "<" | "==" | "!=" | ">=" | ">") E} */
-
-static val expr_C()
-{
-	printd_in("expr");
-	val v = expr_E();
-	printd("expr next");
-	     if(next_is(TOK_LT)) v = v <  expr_E();
-	else if(next_is(TOK_LE)) v = v <= expr_E();
-	else if(next_is(TOK_EQ)) v = v == expr_E();
-	else if(next_is(TOK_NE)) v = v != expr_E();
-	else if(next_is(TOK_GE)) v = v >= expr_E();
-	else if(next_is(TOK_GT)) v = v >  expr_E();
-	printd_out("expr -> " VAL_FMT, v);
-	return v;
-}
-
-
-/*  E --> T {( "+" | "-" ) T} */
-
-static val expr_E()
-{
-	printd_in("expr_E");
-	val v = expr_T();
-	while(tok == TOK_PLUS || tok == TOK_MINUS) {
-		printd("expr_E next");
-		if(next_is(TOK_PLUS))  v += expr_T();
-		if(next_is(TOK_MINUS)) v -= expr_T();
-	}
-	printd_out("expr_E -> " VAL_FMT, v);
-	return v;
-}
-
-
-/* T --> F {( "*" | "/" | "%") F} */
-
-static val expr_T()
-{
-	printd_in("expr_T");
-	val v = expr_F();
-	printd("expr_T next");
-	while(tok == TOK_MUL || tok == TOK_DIV || tok == TOK_MOD) {
-		if(next_is(TOK_MUL)) v *= expr_F();
-		if(next_is(TOK_DIV)) {
-			val v2 = expr_F();
-			if(v2 == 0) error("division by zero");
-			v = v / v2;
-		}
-		if(next_is(TOK_MOD)) {
-			int v2 = (int)expr_F();
-			if(v2 == 0) error("division by zero");
-			v = (int)v % v2;
+		if(b0 & 0x80) {
+			uint8_t b1 = mem[cur++];
+			v = (((b0 & 0x7f) << 8) | b1);
+		} else {
+			v = b0;
 		}
 	}
-	printd_out("expr_T -> " VAL_FMT, v);
 	return v;
 }
 
 
-/* F --> P ["^" F] */
-
-static val expr_F()
+static idx get_var_idx(void)
 {
-	printd_in("expr_F");
-	val v = expr_P();
-	printd("expr_F next");
-	if(next_is(TOK_POW)) v = pow(v, expr_F());
-	printd_out("expr_F -> " VAL_FMT, v);
+	expect(TOK_VAR);
+	idx i = mem[cur++];
+	return i;
+}
+
+
+static val get_var(idx *i)
+{
+	*i = get_var_idx();
+	val v = 0;
+	struct var *var = &vars[*i];
+	if(var->type == VAR_TYPE_VAL) {
+		v = var->v;
+	} else if(var->type == VAR_TYPE_CFUNC) {
+		expect(TOK_OPEN);
+		v = var->fn();
+		expect(TOK_CLOSE);
+		printd("cfunc %s() = " ZB_FMT_VAL, var->name, v);
+	}
 	return v;
 }
 
 
-/* P --> v | "(" E ")" | "-" T | "+" T */
+static idx get_str_idx(void)
+{
+	expect(TOK_STR);
+	size_t len = mem[cur];
+	idx ptr = cur + 1;
+	cur += len + 2;
+	return ptr;
+}
 
-static val expr_P()
+
+static const char *get_str(void)
+{
+	idx ptr = get_str_idx();
+	return (char *)(mem + ptr);
+}
+
+
+static void get_chunk(idx *len, idx *line)
+{
+	expect(TOK_CHUNK);
+	if(len) *len = mem[cur];
+	if(line) *line = (mem[cur+1] << 8) + mem[cur+2];
+	cur += 3;
+}
+
+
+static void dummy_iterator(zb_tok tok, val v, idx i) {}
+
+
+static zb_tok get_tok(val *v, idx *i)
+{
+	zb_tok tok = cur_tok();
+	printd("get_tok");
+
+	if(cur_is(TOK_LIT)) {
+		*v = get_lit();
+	} else if(cur_is(TOK_STR)) {
+		*i = get_str_idx();
+	} else if(cur_is(TOK_VAR)) {
+		*i = get_var_idx();
+		*v = vars[*i].v;
+	} else if(cur_is(TOK_CHUNK)) {
+		get_chunk(NULL, i);
+	} else {
+		cur ++;
+	}
+
+	return tok;
+}
+
+
+static void iter_chunk(void (*fn)(zb_tok tok, val v, idx i))
+{
+	if(fn == NULL) fn = dummy_iterator;
+
+	for(;;) {
+		val v = 0;
+		idx i = 0;
+		zb_tok tok = get_tok(&v, &i);
+		if(tok == TOK_EOF) break;
+		fn(tok, v, i);
+	}
+}
+
+
+static void on_list(zb_tok tok, val v, idx i)
+{
+	if(tok == TOK_CHUNK) {
+		printf(ZB_FMT_IDX " ", i);
+	} else if(tok == TOK_LIT) {
+		printf(ZB_FMT_VAL " ", v);
+	} else if(tok == TOK_STR) {
+		printf("\"%s\" ", mem+i);
+	} else if(tok == TOK_VAR) {
+		printf("%s ", vars[i].name);
+	} else {
+		printf("%s ", tokname(tok));
+	}
+}
+
+
+static void list_chunk(void)
+{
+	idx save = cur;
+	printf(ZB_FMT_IDX ") ", cur);
+	iter_chunk(on_list);
+	printf("\n");
+	cur = save;
+}
+
+
+static void printd(const char *fmt, ...)
+{
+#ifdef DEBUG_RUN
+	static int in_printd = 0;
+	if(in_printd) return;
+	in_printd ++;
+
+	idx save = cur;
+
+	printf(CSI "30;1m");
+	printf("%4d | ", (int)cur);
+
+	va_list va;
+	va_start(va, fmt);
+	int i = vprintf(fmt, va);
+	va_end(va);
+
+	for(; i<30; i++) putchar(' ');
+	printf("| %-10.10s", tokname(cur_tok()));
+
+	if(cur_is(TOK_LIT)) {
+		printf("| " ZB_FMT_VAL, get_lit());
+	} else if(cur_is(TOK_STR)) {
+		printf("| \"%s\"", get_str());
+	} else if(cur_is(TOK_VAR)) {
+		idx i = mem[cur+1];
+		struct var *v = &vars[i];
+		printf("| %s=" ZB_FMT_VAL, v->name, v->v);
+	} else if(cur_is(TOK_CHUNK)) {
+		idx len, line;
+		get_chunk(&len, &line);
+		printf("| chunk line=" ZB_FMT_IDX " len=" ZB_FMT_IDX, line, len);
+	}
+	printf("\n\033[0m");
+
+	cur = save;
+	in_printd--;
+#endif
+}
+
+
+static bool cur_is_operator(void)
+{
+	return cur_tok() < OPERATOR_COUNT;
+}
+
+
+static uint8_t op_prec[OPERATOR_COUNT] = {
+	[TOK_OR]     = 0,
+	[TOK_AND]    = 1,
+	[TOK_BAND]   = 1,
+	[TOK_BOR]    = 1,
+	[TOK_BXOR]   = 1,
+	[TOK_ASSIGN] = 2,
+	[TOK_LT]     = 3,
+	[TOK_LE]     = 3,
+	[TOK_EQ]     = 3,
+	[TOK_NE]     = 3,
+	[TOK_GE]     = 3,
+	[TOK_GT]     = 3,
+	[TOK_PLUS]   = 4,
+	[TOK_MINUS]  = 4,
+	/* unary minus = 5 */
+	[TOK_MUL]    = 6,
+	[TOK_DIV]    = 6,
+	[TOK_MOD]    = 6,
+	[TOK_POW]    = 7,
+};
+
+static int cur_prec(void)
+{
+	zb_tok t = cur_tok();
+	return op_prec[t];
+}
+
+
+static val P(idx *i);
+
+static val E(int p)
+{
+	idx lvalue = ZB_VAR_COUNT;
+	val v = P(&lvalue);
+
+	int prec;
+
+	while(cur_is_operator() && (prec = cur_prec()) >= p) {
+
+		printd("  E %d %d", prec, p);
+
+		zb_tok tok = get_tok(NULL, NULL);
+		int q = (tok == TOK_POW || tok == TOK_ASSIGN) ? prec : prec + 1;
+
+		val v1 = v;
+		val v2 = E(q);
+
+		     if(tok == TOK_PLUS) v = v1 + v2;
+		else if(tok == TOK_MINUS) v = v1 - v2;
+		else if(tok == TOK_MUL) v = v1 * v2;
+		else if(tok == TOK_DIV) v = v1 / v2;
+		else if(tok == TOK_MOD) v = (int)v1 % (int)v2;
+		else if(tok == TOK_POW) v = pow(v1, v2);
+		else if(tok == TOK_LT) v = v1 < v2;
+		else if(tok == TOK_LE) v = v1 <= v2;
+		else if(tok == TOK_EQ) v = v1 == v2;
+		else if(tok == TOK_NE) v = v1 != v2;
+		else if(tok == TOK_GE) v = v1 >= v2;
+		else if(tok == TOK_GT) v = v1 > v2;
+		else if(tok == TOK_AND) v = v1 && v2;
+		else if(tok == TOK_OR) v = v1 || v2;
+		else if(tok == TOK_BAND) v = (int)v1 & (int)v2;
+		else if(tok == TOK_BOR) v = (int)v1 | (int)v2;
+		else if(tok == TOK_BXOR) v = (int)v1 ^ (int)v2;
+		else if(tok == TOK_ASSIGN) {
+			error_if(lvalue == ZB_VAR_COUNT, E_NOT_LVALUE, NULL);
+			struct var *var = &vars[lvalue];
+			var->v = v = v2;
+			var->type = VAR_TYPE_VAL;
+		}
+		else error(E_ASSERT, NULL);
+
+		printd("    " ZB_FMT_VAL " %s " ZB_FMT_VAL " = " ZB_FMT_VAL, v1, tokname(tok), v2, v);
+	}
+
+	printd("  ret " ZB_FMT_VAL, v);
+	return v;
+}
+
+
+static val P(idx *i)
 {
 	val v = 0;
-	printd_in("expr_P");
-	if(tok == TOK_NUMBER) {
-		v = cur_num;
-		next();
-	} else if(tok == TOK_NAME) {
-		if(!cur_var) error("no cur var");
-		v = cur_var->v;
-		printd("get from %s = " VAL_FMT, cur_var->name, v);
-		next();
-	} else if(next_is(TOK_OPEN)) {
-		v = expr();
-		expect(TOK_CLOSE);
-		printd("After open");
+
+	if(cur_is(TOK_LIT)) {
+		v = get_lit();
+	} else if(cur_is(TOK_VAR)) {
+		v = get_var(i);
 	} else if(next_is(TOK_MINUS)) {
-		v = - expr_T();
-	} else if(next_is(TOK_PLUS)) {
-		v = expr_T();
+		v = -E(5); /* unary minus precedence */
+	} else if(next_is(TOK_NOT)) {
+		v = !E(8); /* logical not precedence */
+	} else if(next_is(TOK_BNOT)) {
+		v = ~(int)E(8); /* logical not precedence */
+	} else if(next_is(TOK_OPEN)) {
+		v = E(0);
+		expect(TOK_CLOSE);
 	} else {
-		v = statement();
+		error(E_EXPECTED, "expression");
 	}
-	printd_out("expr_P -> " VAL_FMT, v);
+
 	return v;
 }
-	
 
-int find_next_line(int idx)
+
+static val expr(void)
 {
-	for(idx++;idx<256; idx++) {
-		if(lines[idx].buf[0] != TOK_EOF) {
-			return idx;
-		}
-	}
-	error("no next line found");
-	return 0;
-}
-
-
-static void run_line(int n)
-{
-	if(n < 1 || n > 255) error("line number out of range");
-	if(lines[n].buf[0] == TOK_EOF) error("jump to empty line");
-	printd(">>> %d", n);
-	cur_line = n;
-	pc = lines[cur_line].buf;
-	line();
-}
-
-
-static val statement()
-{
-	printd("statement");
-	if(tok == TOK_NAME) {
-		fn_assign();
-	} 
-	else if(next_is(TOK_CLS))    return fn_cls();
-        else if(next_is(TOK_END))    return fn_end();
-	else if(next_is(TOK_FOR))    return fn_for();
-        else if(next_is(TOK_NEXT))   return fn_next();
-        else if(next_is(TOK_GOSUB))  return fn_gosub();
-        else if(next_is(TOK_GOTO))   return fn_goto();
-        else if(next_is(TOK_IF))     return fn_if();
-        else if(next_is(TOK_LIST))   return fn_list();
-        else if(next_is(TOK_PLOT))   return fn_plot();
-        else if(next_is(TOK_PRINT))  return fn_print();
-        else if(next_is(TOK_QUIT))   return fn_quit();
-        else if(next_is(TOK_REM))    return fn_rem();
-        else if(next_is(TOK_RETURN)) return fn_return();
-        else if(next_is(TOK_RND))    return fn_rnd();
-        else if(next_is(TOK_RUN))    return fn_run();
-        else if(next_is(TOK_SQRT))   return fn_sqrt();
-        else if(next_is(TOK_SLEEP))  return fn_sleep();
-
-	return 0;
-}
-
-
-static void compile(void)
-{
-	int n = cur_num;
-	if(n < 0 || n > 255) error("line number out of range");
-	printd("%d ***", n);
-
-	struct line *l = &lines[n];
-	uint8_t *p =lines[n].buf;
-	uint8_t *q = p;
-	uint8_t *pe = p + sizeof(lines[n]);
-
-	do {
-		next();
-		printd("> %3d: %s %02x", p-lines[n].buf, tokname, tok);
-		if(pe-p < 1) goto too_long;
-		*p++ = tok;
-		if(tok == TOK_NUMBER) {
-			if(pe-p < sizeof(cur_num)) goto too_long;
-			memcpy(p, &cur_num, sizeof(cur_num));
-			p += sizeof(cur_num);
-		} else if(tok == TOK_NAME) {
-			if(pe-p < 1) goto too_long;
-			int i = cur_var - var_list;
-			*p++ = i;
-		} else if(tok == TOK_STRING) {
-			size_t l = toklen-2;
-			if(pe-p < l+1) goto too_long;
-			*p++ = l;
-			char *str = (char *)p;
-			memcpy(p, ts+1, l);
-			p += l;
-			*p = '\0';
-			p ++;
-		}
-	} while(tok != TOK_EOF);
-
-	//while(q <= p) printf("%02x ", *q++);
-	//printf("\n");
-	return;
-
-too_long:
-	error("line %d too long", n);
-}
-
-
-static void line(void)
-{
-	next();
-
-	if(tok == TOK_NUMBER) {
-		if(!running) {
-			compile();
-		}
-	} else {
-		for(;;) {
-			statement();
-			if(tok != TOK_COLON) break;
-			next();
-		}
-		expect(TOK_EOF);
-	}
-}
-
-
-/*
- * Statement handlers
- */
-
-static val fn_run()
-{
-	if(running) error("nested run");
-	int l = find_next_line(0);
-
-	loop_head = 0;
-	call_head = 0;
-
-	running = true;
-	do {
-		run_line(l);
-		if(!running) break;
-		l = goto_line ? goto_line : find_next_line(cur_line);
-		goto_line = 0;
-	} while(l != 0);
-	return 0;
-}
-
-
-static val fn_if()
-{
-	val v = expr();
-
-	expect(TOK_THEN);
-
-	printd("if expr = " VAL_FMT, v);
-
-	if(v) {
-		statement();
-	} else {
-		do {
-			next();
-		} while(tok != TOK_EOF && tok != TOK_ELSE && tok != TOK_COLON);
-
-		if(next_is(TOK_ELSE)) {
-			statement();
-		}
-	}
-	return 0;
+	return E(0);
 }
 
 
 static val fn_print(void)
 {
-	do {
-		if(tok == TOK_STRING) {
-			fwrite(ts+1, toklen-2, 1, stdout);
-			next();
+	printd("print");
+	for(;;) {
+		if(cur_is(TOK_STR)) {
+			printf("%s", get_str());
 		} else {
-			val v = expr();
-			printf(VAL_FMT, v);
+			printf(ZB_FMT_VAL " ", expr());
 		}
-	} while(next_is(TOK_COMMA));
-	printf("\n");
+		if(!next_is(TOK_SEMI)) break;
+	}
+	putchar('\n');
+
 	return 0;
 }
 
 
-static val fn_assign(void)
+static bool run_chunk(bool once);
+
+
+static void run(idx ptr)
 {
-	struct var *var = cur_var;
-	next();
-	printd("assign to %s", var->name);
+	idx save = cur;
+	cur = ptr;
+
+	printd("run");
+
+	while(running) {
+		bool ret = run_chunk(false);
+		if(ret) break;
+	}
+
+	cur = save;
+}
+
+
+static void fn_run(void)
+{
+	error_if(running, E_NESTED_RUN, NULL);
+	running = true;
+	loop_head = 0;
+	run(0);
+	running = false;
+}
+
+
+static idx find_line(idx line)
+{
+	idx save = cur;
+	cur = 0;
+
+	for(;;) {
+		idx ptr = cur;
+		idx len, line2;
+		get_chunk(&len, &line2);
+		if(line == line2) {
+			cur = save;
+			return ptr;
+		}
+		cur = ptr + len;
+	}
+
+	error(E_LINE_NOT_FOUND, NULL);
+	return 0;
+}
+
+
+static void fn_goto(void)
+{
+	idx line = get_lit();
+	idx ptr = find_line(line);
+	printd("goto " ZB_FMT_IDX " at " ZB_FMT_IDX, line, ptr);
+	cur = ptr;
+}
+
+
+static void fn_gosub(void)
+{
+	idx line = get_lit();
+	idx ptr = find_line(line);
+	printd("gosub " ZB_FMT_IDX " at " ZB_FMT_IDX, line, ptr);
+	run(ptr);
+}
+
+
+static void fn_for(void)
+{
+	if(loop_head == ZB_MAX_DEPTH) error(E_NEXT_WITHOUT_FOR, NULL);
+	struct loop *loop = &loop_stack[loop_head ++];
+	loop->var = &vars[get_var_idx()];
 	expect(TOK_ASSIGN);
-	var->v = expr();
-	return var->v;
+	loop->var->v = expr();
+	expect(TOK_TO);
+	loop->v_end = expr();
+	loop->v_step = next_is(TOK_STEP) ? expr() : 1;
+	loop->ptr_start = cur;
+
+	printd("for %s = " ZB_FMT_VAL " to " ZB_FMT_VAL " step " ZB_FMT_VAL, 
+			loop->var->name, loop->var->v, loop->v_end, loop->v_step);
 }
 
 
-static val fn_goto(void)
+static void fn_next(void)
 {
-	goto_line = expr();
-	return 0;
-}
+	if(loop_head == 0) error(E_NEXT_WITHOUT_FOR, NULL);
+	struct loop *loop = &loop_stack[loop_head-1];
+	struct var *var = loop->var;
+	var->v += loop->v_step;
 
-
-static val fn_gosub()
-{
-	if(call_head < CALL_STACK_SIZE-1) {
-		call_stack[call_head++] = cur_line;
-		int l = expr();
-		run_line(l);
+	if((loop->v_step > 0 && var->v <= loop->v_end) ||
+	   (loop->v_step < 0 && var->v >= loop->v_end)) {
+		printd("next %s = " ZB_FMT_VAL " to " ZB_FMT_VAL,
+				loop->var->name, loop->var->v, loop->v_end);
+		cur = loop->ptr_start;
+	} else {
+		loop_head--;
+		printd("next %s done", loop->var->name);
 	}
-	return 0;
 }
 
 
-static val fn_rem(void)
+static void fn_if(void)
 {
-	while(tok != TOK_EOF) next();
-	return 0;
-}
-
-
-static val fn_return(void)
-{
-	if(call_head > 0) {
-		cur_line = call_stack[--call_head];
-	}
-	return 0;
-}
-
-
-static val fn_list(void)
-{
-	int i;
-	for(i=0; i<256; i++) {
-		struct line *line = &lines[i];
-		uint8_t *p = line->buf;
-		if(*p != TOK_EOF) {
-			printf("%d ", i);
-			while(*p != TOK_EOF) {
-				if(*p == TOK_NUMBER) {
-					val v = *(float *)(p+1);
-					printf(VAL_FMT " ", v);
-					p += sizeof(float);
-				} else if(*p == TOK_NAME) {
-					printf("%s ", var_list[*(++p)].name);
-				} else if(*p == TOK_STRING) {
-					size_t len = *++p;
-					printf("\"%s\" ", p);
-					p += len + 1;
-				} else {
-					printf("%s ", tokens[*p]);
-				}
-				p++;
-			}
-			printf("\n");
+	val v = expr();
+	printd("if expr = " ZB_FMT_VAL, v);
+	expect(TOK_THEN);
+	if(v) {
+		run_chunk(true);
+	} else {
+		while(!cur_is(TOK_EOF) && !cur_is(TOK_ELSE) && !cur_is(TOK_COLON)) {
+			val v; idx i;
+			get_tok(&v, &i);
 		}
+		if(next_is(TOK_ELSE)) { /* consume else */ }
 	}
-	return 0;
+}
+
+
+static void fn_else(void)
+{
+	while(!cur_is(TOK_EOF) && !cur_is(TOK_COLON)) {
+		val v; idx i;
+		get_tok(&v, &i);
+	}
+}
+
+
+static bool run_chunk(bool once)
+{
+	do {
+		printd("run_chunk");
+
+		     if(cur_is(TOK_CHUNK)) get_chunk(NULL, NULL);
+		else if(next_is(TOK_PRINT)) fn_print();
+		else if(next_is(TOK_RUN)) fn_run();
+		else if(next_is(TOK_GOTO)) fn_goto();
+		else if(next_is(TOK_GOSUB)) fn_gosub();
+		else if(next_is(TOK_RETURN)) return true;
+		else if(next_is(TOK_FOR)) fn_for();
+		else if(next_is(TOK_NEXT)) fn_next();
+		else if(next_is(TOK_IF)) fn_if();
+		else if(next_is(TOK_ELSE)) fn_else();
+		else if(next_is(TOK_NEXT)) return true;
+		else if(next_is(TOK_COLON)) /* next statement */;
+		else if(next_is(TOK_END)) running = false;
+		else if(next_is(TOK_EOF)) break;
+		else expr();
+	} while(!once);
+
+	return false;
+}
+
+
+static void handle_line(const char *line)
+{
+	idx save = end;
+
+	bool exec = lex(line);
+
+	if(0) {
+		list_chunk();
+		cur = save;
+	}
+
+	if(exec) {
+		cur = save;
+		run_chunk(false);
+		end = save;
+		cur = save;
+	}
+}
+
+
+static void zb_register_cfunc(const char *name, val (*fn)(void))
+{
+	idx i = find_var(name, strlen(name));
+	struct var *var = &vars[i];
+	var->type = VAR_TYPE_CFUNC;
+	var->fn = fn;
+}
+
+
+static val fn_rnd(void)
+{
+	return rand() / (val)RAND_MAX;
+}
+
+
+static val fn_putc(void)
+{
+	return putchar(expr());
 }
 
 
@@ -825,145 +967,57 @@ static val fn_plot(void)
 	int x = expr();
 	expect(TOK_COMMA);
 	int y = expr();
-	int color = 0;
-	struct var *var = var_find("color", 5);
-	if(var) color = (int)var->v % 16;
-	
-	printf("\e[s\e[%d;%dH", y, x*2);
-	printf("\e[%d;%d;7m  \e[0m\e[u", color >= 8, colorcode[color % 8]);
+	expect(TOK_COMMA);
+	int color = expr();
 
+	printf(CSI "s\033[%d;%dH", y, x*2);
+	printf(CSI "%d;%d;7m  \033[0m\033[u", color >= 8, colorcode[color % 8]);
 	fflush(stdout);
-	next();
+
 	return 0;
 }
 
 
 static val fn_cls(void)
 {
-	printf("\e[2J\e[H");
-	fflush(stdout);
 	return 0;
 }
 
 
-static val fn_end(void)
+static val fn_exit(void)
 {
-	running = false;
-	return 0;
+	exit(expr());
 }
 
-
-static val fn_for(void)
-{
-	if(loop_head >= LOOP_STACK_SIZE) error("loop stack overflow");
-	if(cur_line == 0) error("not running");
-
-	if(tok != TOK_NAME) error("expected NAME");
-
-	struct loop *loop = &loop_stack[loop_head++];
-	loop->line = find_next_line(cur_line);
-	loop->var = cur_var;
-
-	next();
-	expect(TOK_ASSIGN);
-
-	loop->var->v = expr();
-
-	expect(TOK_TO);
-	loop->v_end = expr();
-	if(next_is(TOK_STEP)) {
-		loop->v_step = expr();
-	} else {
-		loop->v_step = 1;
-	}
-	
-	printd("for on %s: " VAL_FMT " step " VAL_FMT, loop->var->name, loop->var->v, loop->v_step);
-
-	return 0;
-}
-
-
-static val fn_next(void)
-{
-	if(loop_head == 0) {
-		error("next without for");
-	}
-	
-	struct loop *loop = &loop_stack[loop_head-1];
-
-	if(tok == TOK_NAME) {
-		if(cur_var != loop->var) error("for/next nesting mismatch");
-		next();
-	}
-	
-
-	struct var *var = loop->var;
-	printd("next on %s: " VAL_FMT, var->name, var->v);
-	var->v += loop->v_step;
-
-	if((loop->v_step > 0 && var->v <= loop->v_end) ||
-	   (loop->v_step < 0 && var->v >= loop->v_end)) {
-		run_line(loop->line);
-	} else {
-		loop_head --;
-		loop_stack[loop_head].var = NULL;
-	}
-
-	return 0;
-}
-
-
-static val fn_quit(void)
-{
-	exit(0);
-}
-
-
-static val fn_sleep(void)
-{
-	usleep(expr() * 1.0e6);
-	return 0;
-}
-
-
-static val fn_rnd(void)
-{
-	return rand();
-}
-
-
-static val fn_sqrt(void)
-{
-	return sqrt(expr());
-}
-
-
-/*
- * Main: read lines and feed to line() function
- */
 
 int main(int argc, char **argv)
 {
-	static char inp[120];
 	srand(time(NULL));
 
-	//signal(SIGINT, on_sig);
+	char line[120];
 
-	while(fgets(inp, sizeof(inp), stdin) != NULL) {
+	zb_register_cfunc("rnd", fn_rnd);
+	zb_register_cfunc("putc", fn_putc);
+	zb_register_cfunc("plot", fn_plot);
+	zb_register_cfunc("cls", fn_cls);
+	zb_register_cfunc("exit", fn_exit);
 
+	while(fgets(line, sizeof(line), stdin) != NULL) {
+		char *p = strchr(line, '\n'); if(p) *p = '\0';
 		if(setjmp(jmpbuf) == 0) {
-			cur_line = 0;
-			p = inp;
-			pe = p + strlen(inp);
-			line();
+			handle_line(line);
 		} else {
 			running = false;
 		};
 	}
-	
+
+	if(0) dump_vars();
+	if(0) list_chunk();
+
 	return 0;
 }
 
-/* 
+/*
  * vi: ft=c
  */
+
