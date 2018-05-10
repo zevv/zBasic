@@ -7,10 +7,10 @@ under 4kB code on ARM THUMB. It is easily extended by writing C functions that
 can be called from BASIC code.
 
 The core variable type can be configured to fit the host system, zBasic
-supports signed and unsigned integer or floa/double variables.
+supports signed and unsigned integer or float/double variables.
 
-The BASIC source is parsed and converted into byte code resulting in decent
-performance.
+The BASIC source is parsed and converted into byte code resulting in pretty
+decent performance.
 
 zBasic currently supports:
 
