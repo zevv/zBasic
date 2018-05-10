@@ -19,10 +19,13 @@ zBasic currently supports:
 
 Strings and arrays are not yet supported.
 
+
 Usage
 =====
 
+````
 $ make
 $ make test
 $ ./zbasic < basic/mandel.bas
+````
 
