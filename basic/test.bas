@@ -48,7 +48,8 @@
  48 l = 48 : if !!!1 != 0 then gosub 1000
  49 l = 49 : if !3 != 0 then gosub 1000
  50 l = 50 : if ~0 != -1 then gosub 1000
- 50 l = 51 : if (255 & (~32)) != 223 then gosub 1000
+ 51 l = 51 : if (255 & (~32)) != 223 then gosub 1000
+ 52 l = 52 : if (1 or 1 and 0) != 1 then gosub 1000
 
 900 if errors != 0 then exit(1) else print "ok"
 999 end

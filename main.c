@@ -1,8 +1,4 @@
 
-/*
- * http://www.engr.mun.ca/~theo/Misc/exp_parsing.htm#classic
- */
-
 //#define DEBUG_RUN
 //#define DEBUG_LEX
 
@@ -64,11 +60,15 @@ typedef enum {
 
 typedef enum {
 
-	/* Operators */
+	/* Binary operators */
 
 	TOK_ASSIGN, TOK_MINUS, TOK_PLUS, TOK_MUL, TOK_DIV, TOK_MOD, TOK_LT,
 	TOK_LE, TOK_EQ, TOK_NE, TOK_GE, TOK_GT, TOK_POW, TOK_AND, TOK_OR,
-	TOK_BAND, TOK_BOR, TOK_BXOR, TOK_NOT, TOK_BNOT,
+	TOK_BAND, TOK_BOR, TOK_BXOR, 
+
+	/* Unary operators */
+	
+	TOK_NOT, TOK_BNOT,
 
 	/* Keywords */
 
@@ -83,18 +83,20 @@ typedef enum {
 	NUM_TOKENS
 } zb_tok;
 
-#define OPERATOR_COUNT (TOK_BNOT+1)
+#define BINOP_COUNT (TOK_BXOR+1)
 
 #define _ "\0"
 
 static const char tokstr[] =
 
 	"=" _ "-" _ "+" _ "*" _ "/" _ "%" _ "<" _ "<=" _ "==" _ "<>" _ ">=" _
-	">" _ "**" _ "and" _ "or" _ "&" _ "|" _ "^" _ "!" _ "~" _
+	">" _ "**" _ "and" _ "or" _ "&" _ "|" _ "^" _ 
+	
+	"!" _ "~" _
 
 	"else" _ "for" _ "gosub" _ "goto" _ "if" _ "next" _ "return" _
 	"run" _ "then" _ "to" _ "print" _ "end" _ "step" _ ":" _ 
-	"("_ ")" _ ";" _ "," _
+	"(" _ ")" _ ";" _ "," _
 
 	"CHU" _ "LIT" _ "VAR" _ "STR" _ "NON" _ "EOF";
 
@@ -102,7 +104,7 @@ static const char *errmsg[] = {
 	[E_SYNTAX_ERROR] = "Syntax error",
 	[E_VAR_MEM_FULL] = "Too many variables",
 	[E_UNTERM_STR] = "Unterminated string",
-	[E_MEM_FULL] = "Pool full",
+	[E_MEM_FULL] = "Mem full",
 	[E_EXPECTED] = "Expected",
 	[E_DIV_BY_ZERO] = "Division by zero",
 	[E_NESTED_RUN] = "Nested run",
@@ -398,6 +400,7 @@ static bool lex(const char *line)
 		else if(*p == '/') put_tok(TOK_MOD);
 		else if(*p == ',') put_tok(TOK_COMMA);
 		else if(*p == ';') put_tok(TOK_SEMI);
+		else if(*p == '?') put_tok(TOK_PRINT);
 		else error(E_SYNTAX_ERROR, p);
 
 		p++;
@@ -628,86 +631,80 @@ static void printd(const char *fmt, ...)
 }
 
 
-static bool cur_is_operator(void)
-{
-	return cur_tok() < OPERATOR_COUNT;
-}
-
-
-static uint8_t op_prec[OPERATOR_COUNT] = {
-	[TOK_OR]     = 0,
-	[TOK_AND]    = 1,
-	[TOK_BAND]   = 1,
-	[TOK_BOR]    = 1,
-	[TOK_BXOR]   = 1,
-	[TOK_ASSIGN] = 2,
-	[TOK_LT]     = 3,
-	[TOK_LE]     = 3,
-	[TOK_EQ]     = 3,
-	[TOK_NE]     = 3,
-	[TOK_GE]     = 3,
-	[TOK_GT]     = 3,
-	[TOK_PLUS]   = 4,
-	[TOK_MINUS]  = 4,
-	/* unary minus = 5 */
-	[TOK_MUL]    = 6,
-	[TOK_DIV]    = 6,
-	[TOK_MOD]    = 6,
-	[TOK_POW]    = 7,
+static uint8_t binop_prec[BINOP_COUNT] = {
+	[TOK_OR]     = 0, [TOK_AND]    = 1, [TOK_BAND]   = 1, [TOK_BOR]    = 1,
+	[TOK_BXOR]   = 1, [TOK_ASSIGN] = 2, [TOK_LT]     = 3, [TOK_LE]     = 3,
+	[TOK_EQ]     = 3, [TOK_NE]     = 3, [TOK_GE]     = 3, [TOK_GT]     = 3,
+	[TOK_PLUS]   = 4, [TOK_MINUS]  = 4, [TOK_MUL]    = 6, [TOK_DIV]    = 6,
+	[TOK_MOD]    = 6, [TOK_POW]    = 7,
+	/* unary minus = 5, unary not and binary not = 8 */
 };
+
+static bool cur_is_binop(void)
+{
+	return cur_tok() < BINOP_COUNT;
+}
 
 static int cur_prec(void)
 {
-	zb_tok t = cur_tok();
-	return op_prec[t];
+	return binop_prec[cur_tok()];
 }
 
+
+/*
+ * http://www.engr.mun.ca/~theo/Misc/exp_parsing.htm#climbing
+ */
 
 static val P(idx *i);
 
 static val E(int p)
 {
 	idx lvalue = ZB_VAR_COUNT;
-	val v = P(&lvalue);
-
 	int prec;
 
-	while(cur_is_operator() && (prec = cur_prec()) >= p) {
+	val v = P(&lvalue);
+
+	while(cur_is_binop() && (prec = cur_prec()) >= p) {
 
 		printd("  E %d %d", prec, p);
 
 		zb_tok tok = get_tok(NULL, NULL);
-		int q = (tok == TOK_POW || tok == TOK_ASSIGN) ? prec : prec + 1;
+		if (tok != TOK_POW && tok != TOK_ASSIGN) prec++;
 
 		val v1 = v;
-		val v2 = E(q);
+		val v2 = E(prec);
+		int i1 = v1;
+		int i2 = v2;
 
-		     if(tok == TOK_PLUS) v = v1 + v2;
-		else if(tok == TOK_MINUS) v = v1 - v2;
-		else if(tok == TOK_MUL) v = v1 * v2;
-		else if(tok == TOK_DIV) v = v1 / v2;
-		else if(tok == TOK_MOD) v = (int)v1 % (int)v2;
-		else if(tok == TOK_POW) v = pow(v1, v2);
-		else if(tok == TOK_LT) v = v1 < v2;
-		else if(tok == TOK_LE) v = v1 <= v2;
-		else if(tok == TOK_EQ) v = v1 == v2;
-		else if(tok == TOK_NE) v = v1 != v2;
-		else if(tok == TOK_GE) v = v1 >= v2;
-		else if(tok == TOK_GT) v = v1 > v2;
-		else if(tok == TOK_AND) v = v1 && v2;
-		else if(tok == TOK_OR) v = v1 || v2;
-		else if(tok == TOK_BAND) v = (int)v1 & (int)v2;
-		else if(tok == TOK_BOR) v = (int)v1 | (int)v2;
-		else if(tok == TOK_BXOR) v = (int)v1 ^ (int)v2;
-		else if(tok == TOK_ASSIGN) {
-			error_if(lvalue == ZB_VAR_COUNT, E_NOT_LVALUE, NULL);
-			struct var *var = &vars[lvalue];
-			var->v = v = v2;
-			var->type = VAR_TYPE_VAL;
+		switch(tok) {
+			case TOK_PLUS:  v = v1 + v2;     break;
+			case TOK_MINUS: v = v1 - v2;     break;
+			case TOK_MUL:   v = v1 * v2;     break;
+			case TOK_DIV:   v = v1 / v2;     break;
+			case TOK_MOD:   v = i1 % i2;     break;
+			case TOK_POW:   v = pow(v1, v2); break;
+			case TOK_LT:    v = v1 < v2;     break;
+			case TOK_LE:    v = v1 <= v2;    break;
+			case TOK_EQ:    v = v1 == v2;    break;
+			case TOK_NE:    v = v1 != v2;    break;
+			case TOK_GE:    v = v1 >= v2;    break;
+			case TOK_GT:    v = v1 > v2;     break;
+			case TOK_AND:   v = v1 && v2;    break;
+			case TOK_OR:    v = v1 || v2;    break;
+			case TOK_BAND:  v = i1 & i2;     break;
+			case TOK_BOR:   v = i1 | i2;     break;
+			case TOK_BXOR:  v = i1 ^ i2;     break;
+			case TOK_ASSIGN: {
+				error_if(lvalue == ZB_VAR_COUNT, E_NOT_LVALUE, NULL);
+				struct var *var = &vars[lvalue];
+				var->v = v = v2;
+				var->type = VAR_TYPE_VAL;
+				break;
+			}
+			default: error(E_ASSERT, NULL);
 		}
-		else error(E_ASSERT, NULL);
 
-		printd("    " ZB_FMT_VAL " %s " ZB_FMT_VAL " = " ZB_FMT_VAL, v1, tokname(tok), v2, v);
+		printd("    " ZB_FMT_VAL " %s " ZB_FMT_VAL " -> " ZB_FMT_VAL, v1, tokname(tok), v2, v);
 	}
 
 	printd("  ret " ZB_FMT_VAL, v);
@@ -939,12 +936,27 @@ static void handle_line(const char *line)
 }
 
 
+struct cfunc {
+	const char *name;
+	val (*fn)(void);
+};
+
+
 static void zb_register_cfunc(const char *name, val (*fn)(void))
 {
-	idx i = find_var(name, strlen(name));
-	struct var *var = &vars[i];
-	var->type = VAR_TYPE_CFUNC;
-	var->fn = fn;
+       idx i = find_var(name, strlen(name));
+       struct var *var = &vars[i];
+       var->type = VAR_TYPE_CFUNC;
+       var->fn = fn;
+}
+
+
+static void zb_register_cfuncs(struct cfunc *cf)
+{
+	while(cf->name) {
+		zb_register_cfunc(cf->name, cf->fn);
+		cf++;
+	}
 }
 
 
@@ -990,17 +1002,23 @@ static val fn_exit(void)
 }
 
 
+static struct cfunc cfunc_list[] = {
+	{ "rnd", fn_rnd },
+	{ "putc", fn_putc },
+	{ "plot", fn_plot },
+	{ "cls", fn_cls },
+	{ "exit", fn_exit },
+	{ NULL }
+};
+
+
 int main(int argc, char **argv)
 {
 	srand(time(NULL));
 
 	char line[120];
 
-	zb_register_cfunc("rnd", fn_rnd);
-	zb_register_cfunc("putc", fn_putc);
-	zb_register_cfunc("plot", fn_plot);
-	zb_register_cfunc("cls", fn_cls);
-	zb_register_cfunc("exit", fn_exit);
+	zb_register_cfuncs(cfunc_list);
 
 	while(fgets(line, sizeof(line), stdin) != NULL) {
 		char *p = strchr(line, '\n'); if(p) *p = '\0';
