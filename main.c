@@ -64,7 +64,7 @@ typedef enum {
 
 	TOK_ASSIGN, TOK_MINUS, TOK_PLUS, TOK_MUL, TOK_DIV, TOK_MOD, TOK_LT,
 	TOK_LE, TOK_EQ, TOK_NE, TOK_GE, TOK_GT, TOK_POW, TOK_AND, TOK_OR,
-	TOK_BAND, TOK_BOR, TOK_BXOR, 
+	TOK_BAND, TOK_BOR, TOK_BXOR, TOK_LSH, TOK_RSH,
 
 	/* Unary operators */
 	
@@ -83,14 +83,14 @@ typedef enum {
 	NUM_TOKENS
 } zb_tok;
 
-#define BINOP_COUNT (TOK_BXOR+1)
+#define BINOP_COUNT (TOK_RSH+1)
 
 #define _ "\0"
 
 static const char tokstr[] =
 
 	"=" _ "-" _ "+" _ "*" _ "/" _ "%" _ "<" _ "<=" _ "==" _ "<>" _ ">=" _
-	">" _ "**" _ "and" _ "or" _ "&" _ "|" _ "^" _ 
+	">" _ "**" _ "and" _ "or" _ "&" _ "|" _ "^" _ "<<" _ ">>" _
 	
 	"!" _ "~" _
 
@@ -360,12 +360,18 @@ static bool lex(const char *line)
 			} else if(*(p+1) == '>') {
 				put_tok(TOK_NE);
 				p++;
+			} else if(*(p+1) == '<') {
+				put_tok(TOK_LSH);
+				p++;
 			} else {
 				put_tok(TOK_LT);
 			}
 		} else if(*p == '>') {
 			if(*(p+1) == '=') {
 				put_tok(TOK_GE);
+				p++;
+			} else if(*(p+1) == '>') {
+				put_tok(TOK_RSH);
 				p++;
 			} else {
 				put_tok(TOK_GT);
@@ -632,12 +638,27 @@ static void printd(const char *fmt, ...)
 
 
 static uint8_t binop_prec[BINOP_COUNT] = {
-	[TOK_OR]     = 0, [TOK_AND]    = 1, [TOK_BAND]   = 1, [TOK_BOR]    = 1,
-	[TOK_BXOR]   = 1, [TOK_ASSIGN] = 2, [TOK_LT]     = 3, [TOK_LE]     = 3,
-	[TOK_EQ]     = 3, [TOK_NE]     = 3, [TOK_GE]     = 3, [TOK_GT]     = 3,
-	[TOK_PLUS]   = 4, [TOK_MINUS]  = 4, [TOK_MUL]    = 6, [TOK_DIV]    = 6,
-	[TOK_MOD]    = 6, [TOK_POW]    = 7,
-	/* unary minus = 5, unary not and binary not = 8 */
+	[TOK_ASSIGN] = 0,
+	[TOK_OR]     = 1,
+	[TOK_AND]    = 2,
+	[TOK_BOR]    = 3,
+	[TOK_BXOR]   = 4,
+	[TOK_BAND]   = 5,
+	[TOK_EQ]     = 6,
+	[TOK_NE]     = 6,
+	[TOK_LT]     = 7,
+	[TOK_LE]     = 7,
+	[TOK_GE]     = 7,
+	[TOK_GT]     = 7,
+	[TOK_LSH]    = 8,
+	[TOK_RSH]    = 8,
+	[TOK_PLUS]   = 9,
+	[TOK_MINUS]  = 9,
+	[TOK_MUL]    = 10,
+	[TOK_DIV]    = 10,
+	[TOK_MOD]    = 10,
+	/* unaries = 11 */
+	[TOK_POW]    = 12,
 };
 
 static bool cur_is_binop(void)
@@ -694,6 +715,8 @@ static val E(int p)
 			case TOK_BAND:  v = i1 & i2;     break;
 			case TOK_BOR:   v = i1 | i2;     break;
 			case TOK_BXOR:  v = i1 ^ i2;     break;
+			case TOK_RSH:   v = i1 >> i2;    break;
+			case TOK_LSH:   v = i1 << i2;    break;
 			case TOK_ASSIGN: {
 				error_if(lvalue == ZB_VAR_COUNT, E_NOT_LVALUE, NULL);
 				struct var *var = &vars[lvalue];
@@ -721,11 +744,11 @@ static val P(idx *i)
 	} else if(cur_is(TOK_VAR)) {
 		v = get_var(i);
 	} else if(next_is(TOK_MINUS)) {
-		v = -E(5); /* unary minus precedence */
+		v = -E(11); /* unary minus precedence */
 	} else if(next_is(TOK_NOT)) {
-		v = !E(8); /* logical not precedence */
+		v = !E(11); /* logical not precedence */
 	} else if(next_is(TOK_BNOT)) {
-		v = ~(int)E(8); /* logical not precedence */
+		v = ~(int)E(11); /* logical not precedence */
 	} else if(next_is(TOK_OPEN)) {
 		v = E(0);
 		expect(TOK_CLOSE);
