@@ -89,7 +89,7 @@ typedef enum {
 
 static const char tokstr[] =
 
-	"=" _ "-" _ "+" _ "*" _ "/" _ "%" _ "<" _ "<=" _ "==" _ "<>" _ ">=" _
+	"=" _ "-" _ "+" _ "*" _ "/" _ "%" _ "<" _ "<=" _ "==" _ "!=" _ ">=" _
 	">" _ "**" _ "and" _ "or" _ "&" _ "|" _ "^" _ "<<" _ ">>" _
 	
 	"!" _ "~" _
@@ -290,6 +290,23 @@ static bool is_alnum(char c)
 static bool is_hexdigit(char c)
   { return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
 
+
+static bool match_longest_tok(const char **pp)
+{
+	size_t i;
+	size_t matches = 0;
+	for(i=6; i>0; i--) {
+		zb_tok tok = find_tok(*pp, i);
+		if(tok != TOK_NONE) {
+			put_tok(tok);
+			*pp += i-1;
+			return true;
+		}
+	}
+	return false;
+}
+
+
 static bool lex(const char *line)
 {
 	idx start = end;
@@ -305,7 +322,7 @@ static bool lex(const char *line)
 		const char *q = p;
 		idx prev = end;
 
-		if(*p == '\n' || *p == '\0') {
+		if(*p == '\0') {
 			put_tok(TOK_EOF);
 			break;
 		} else if(is_digit(*p)) {
@@ -320,19 +337,9 @@ static bool lex(const char *line)
 				p+=2;
 				while(is_hexdigit(*p)) p++;
 			} else {
-				while(is_alnum(*p)) p++;
+				while(is_digit(*p)) p++;
 				if(*p == '.') p++;
-				while(is_alnum(*p)) p++;
-			}
-			p--;
-		} else if(is_alpha(*p)) {
-			const char *ps = p;
-			while(is_alnum(*p) || *p == '$') p++;
-			zb_tok tok = find_tok(ps, p-ps);
-			if(tok == TOK_NONE) {
-				put_var(find_var(ps, p-ps));
-			} else {
-				put_tok(tok);
+				while(is_digit(*p)) p++;
 			}
 			p--;
 		} else if(*p == '"') {
@@ -346,68 +353,14 @@ static bool lex(const char *line)
 			p++;
 			put_lit(*p++);
 			if(*p != '\'') error(E_UNTERM_STR, NULL);
-		} else if(*p == '=') {
-			if(*(p+1) == '=') {
-				put_tok(TOK_EQ);
-				p++;
-			} else {
-				put_tok(TOK_ASSIGN);
-			}
-		} else if(*p == '<') {
-			if(*(p+1) == '=') {
-				put_tok(TOK_LE);
-				p++;
-			} else if(*(p+1) == '>') {
-				put_tok(TOK_NE);
-				p++;
-			} else if(*(p+1) == '<') {
-				put_tok(TOK_LSH);
-				p++;
-			} else {
-				put_tok(TOK_LT);
-			}
-		} else if(*p == '>') {
-			if(*(p+1) == '=') {
-				put_tok(TOK_GE);
-				p++;
-			} else if(*(p+1) == '>') {
-				put_tok(TOK_RSH);
-				p++;
-			} else {
-				put_tok(TOK_GT);
-			}
-		} else if(*p == '*') {
-			if(*(p+1) == '*') {
-				put_tok(TOK_POW);
-				p++;
-			} else {
-				put_tok(TOK_MUL);
-			}
-		} else if(*p == '!') {
-			if(*(p+1) == '=') {
-				put_tok(TOK_NE);
-				p++;
-			} else {
-				put_tok(TOK_NOT);
-			}
-		}
-		else if(*p == ':') put_tok(TOK_COLON);
-		else if(*p == '-') put_tok(TOK_MINUS);
-		else if(*p == '+') put_tok(TOK_PLUS);
-		else if(*p == '&') put_tok(TOK_BAND);
-		else if(*p == '|') put_tok(TOK_BOR);
-		else if(*p == '^') put_tok(TOK_BXOR);
-		else if(*p == '~') put_tok(TOK_BNOT);
-		else if(*p == '%') put_tok(TOK_MOD);
-		else if(*p == '^') put_tok(TOK_POW);
-		else if(*p == '(') put_tok(TOK_OPEN);
-		else if(*p == ')') put_tok(TOK_CLOSE);
-		else if(*p == '/') put_tok(TOK_DIV);
-		else if(*p == '/') put_tok(TOK_MOD);
-		else if(*p == ',') put_tok(TOK_COMMA);
-		else if(*p == ';') put_tok(TOK_SEMI);
-		else if(*p == '?') put_tok(TOK_PRINT);
-		else error(E_SYNTAX_ERROR, p);
+		} else if(match_longest_tok(&p)) {
+			/* found a token */
+		} else if(is_alpha(*p)) {
+			const char *ps = p;
+			while(is_alnum(*p)) p++;
+			put_var(find_var(ps, p-ps));
+			p--;
+		} else error(E_SYNTAX_ERROR, p);
 
 		p++;
 
@@ -701,9 +654,6 @@ static val E(int p)
 			case TOK_PLUS:  v = v1 + v2;     break;
 			case TOK_MINUS: v = v1 - v2;     break;
 			case TOK_MUL:   v = v1 * v2;     break;
-			case TOK_DIV:   v = v1 / v2;     break;
-			case TOK_MOD:   v = i1 % i2;     break;
-			case TOK_POW:   v = pow(v1, v2); break;
 			case TOK_LT:    v = v1 < v2;     break;
 			case TOK_LE:    v = v1 <= v2;    break;
 			case TOK_EQ:    v = v1 == v2;    break;
@@ -717,6 +667,12 @@ static val E(int p)
 			case TOK_BXOR:  v = i1 ^ i2;     break;
 			case TOK_RSH:   v = i1 >> i2;    break;
 			case TOK_LSH:   v = i1 << i2;    break;
+			case TOK_POW:   v = pow(v1, v2); break;
+			case TOK_DIV:   
+			case TOK_MOD:  
+				error_if(v2==0, E_DIV_BY_ZERO, NULL);
+				v = (tok == TOK_DIV) ? v1 / v2 : i1 % i2;
+				break;
 			case TOK_ASSIGN: {
 				error_if(lvalue == ZB_VAR_COUNT, E_NOT_LVALUE, NULL);
 				struct var *var = &vars[lvalue];
@@ -727,7 +683,8 @@ static val E(int p)
 			default: error(E_ASSERT, NULL);
 		}
 
-		printd("    " ZB_FMT_VAL " %s " ZB_FMT_VAL " -> " ZB_FMT_VAL, v1, tokname(tok), v2, v);
+		printd("    " ZB_FMT_VAL " %s " ZB_FMT_VAL " -> " ZB_FMT_VAL,
+				v1, tokname(tok), v2, v);
 	}
 
 	printd("  ret " ZB_FMT_VAL, v);
@@ -821,6 +778,7 @@ static idx find_line(idx line)
 		idx ptr = cur;
 		idx len, line2;
 		get_chunk(&len, &line2);
+		error_if(len == 0, E_ASSERT, NULL);
 		if(line == line2) {
 			cur = save;
 			return ptr;
