@@ -1,5 +1,5 @@
 
-10 cls() : zoom = 13 : max = 15 : min = 15 : dx = -0.235125 : dy = -0.827215
+10 cls() : zoom = 13 : max = 15 : min = 15 : dx = -0.235125 : dy = -.827215
 20 for nn = 1 to 80
 30 for i = -15 to 15
 40 for j = -20 to 20

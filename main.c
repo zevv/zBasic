@@ -325,7 +325,7 @@ static bool lex(const char *line)
 		if(*p == '\0') {
 			put_tok(TOK_EOF);
 			break;
-		} else if(is_digit(*p)) {
+		} else if(is_digit(*p) || *p == '.') {
 			val v = atof(p);
 			if(first) {
 				set_chunk_line(start, v);
