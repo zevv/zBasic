@@ -484,9 +484,6 @@ static void get_chunk(idx *len, idx *line)
 }
 
 
-static void dummy_iterator(zb_tok tok, val v, idx i) {}
-
-
 static zb_tok get_tok(val *v, idx *i)
 {
 	zb_tok tok = cur_tok();
@@ -509,41 +506,29 @@ static zb_tok get_tok(val *v, idx *i)
 }
 
 
-static void iter_chunk(void (*fn)(zb_tok tok, val v, idx i))
-{
-	if(fn == NULL) fn = dummy_iterator;
-
-	for(;;) {
-		val v = 0;
-		idx i = 0;
-		zb_tok tok = get_tok(&v, &i);
-		if(tok == TOK_EOF) break;
-		fn(tok, v, i);
-	}
-}
-
-
-static void on_list(zb_tok tok, val v, idx i)
-{
-	if(tok == TOK_CHUNK) {
-		printf(ZB_FMT_IDX " ", i);
-	} else if(tok == TOK_LIT) {
-		printf(ZB_FMT_VAL " ", v);
-	} else if(tok == TOK_STR) {
-		printf("\"%s\" ", mem+i);
-	} else if(tok == TOK_VAR) {
-		printf("%s ", vars[i].name);
-	} else {
-		printf("%s ", tokname(tok));
-	}
-}
-
-
 static void list_chunk(void)
 {
 	idx save = cur;
 	printf(ZB_FMT_IDX ") ", cur);
-	iter_chunk(on_list);
+	for(;;) {
+		val v = 0;
+		idx i = 0;
+		zb_tok tok = get_tok(&v, &i);
+
+		if(tok == TOK_EOF) {
+			break;
+		} else if(tok == TOK_CHUNK) {
+			printf(ZB_FMT_IDX " ", i);
+		} else if(tok == TOK_LIT) {
+			printf(ZB_FMT_VAL " ", v);
+		} else if(tok == TOK_STR) {
+			printf("\"%s\" ", mem+i);
+		} else if(tok == TOK_VAR) {
+			printf("%s ", vars[i].name);
+		} else {
+			printf("%s ", tokname(tok));
+		}
+	}
 	printf("\n");
 	cur = save;
 }
@@ -668,11 +653,8 @@ static val E(int p)
 			case TOK_RSH:   v = i1 >> i2;    break;
 			case TOK_LSH:   v = i1 << i2;    break;
 			case TOK_POW:   v = pow(v1, v2); break;
-			case TOK_DIV:   
-			case TOK_MOD:  
-				error_if(v2==0, E_DIV_BY_ZERO, NULL);
-				v = (tok == TOK_DIV) ? v1 / v2 : i1 % i2;
-				break;
+			case TOK_DIV:   v = v1 / v2;     break;
+			case TOK_MOD:   v = i1 % i2;     break;
 			case TOK_ASSIGN: {
 				error_if(lvalue == ZB_VAR_COUNT, E_NOT_LVALUE, NULL);
 				struct var *var = &vars[lvalue];

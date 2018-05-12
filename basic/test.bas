@@ -1,9 +1,9 @@
   1 errors = 0
   2 l =  2 : if 1+4*4 != 17 then gosub 1000
   3 l =  3 : if 4*4+1 != 17 then gosub 1000
-  4 l =  4 : if 3**3**3 != 7625597484987 then gosub 1000
-  5 l =  5 : if (3**3)**3 != 19683 then gosub 1000
-  6 l =  6 : if 3**(3**3) != 7625597517824 then gosub 1000
+  4 l =  4 : if 4**3**2 != 262144 then gosub 1000
+  5 l =  5 : if (4**3)**2 != 4096 then gosub 1000
+  6 l =  6 : if 4**(3**2) != 262144 then gosub 1000
   7 l =  7 : n = 0 : for i = 1 to 3 : for j = 1 to 3 : n = n + 1 : next : next : if n != 9 then gosub 1000
   8 l =  8 : n = 0 : for i = 1 to 3 : for j = i to 3 : n = n + 1 : next : next : if n != 6 then gosub 1000
   9 l =  9 : n = 0 : for i = 1 to 3 : for j = 1 to i : n = n + 1 : next : next : if n != 6 then gosub 1000
@@ -31,7 +31,6 @@
  31 l = 31 : if 2**14 != 16384 then gosub 1000
  32 l = 32 : if 2**15 != 32768 then gosub 1000
  33 l = 33 : if 2**16 != 65536 then gosub 1000
- 34 l = 34 : if 1.5*2 != 3 then gosub 1000
  35 l = 35 : if 2*2*2*2*2*2*2*2*127 != 32512 then gosub 1000
  36 l = 36 : if 13*41*61 != 32513 then gosub 1000
  37 l = 37 : a = 0 : for i = 1 to 100 step 3 : a = a + 1 : next : if a != 34 then gosub 1000
