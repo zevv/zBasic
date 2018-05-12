@@ -287,9 +287,6 @@ static bool is_alpha(char c)
 static bool is_alnum(char c)
   { return is_alpha(c) || is_digit(c); }
 
-static bool is_hexdigit(char c)
-  { return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
-
 
 static bool match_longest_tok(const char **pp)
 {
@@ -326,22 +323,15 @@ static bool lex(const char *line)
 			put_tok(TOK_EOF);
 			break;
 		} else if(is_digit(*p) || *p == '.') {
-			val v = atof(p);
+			char *pe;
+			val v = strtof(p, &pe);
 			if(first) {
 				set_chunk_line(start, v);
 				exec = false;
 			} else {
 				put_lit(v);
 			}
-			if(*p == '0' && *(p+1) == 'x') {
-				p+=2;
-				while(is_hexdigit(*p)) p++;
-			} else {
-				while(is_digit(*p)) p++;
-				if(*p == '.') p++;
-				while(is_digit(*p)) p++;
-			}
-			p--;
+			if(pe) p = pe - 1;
 		} else if(*p == '"') {
 			const char *ps = ++p;
 			while(*p != '"') {
