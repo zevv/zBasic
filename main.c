@@ -1,6 +1,6 @@
 
 //#define DEBUG_RUN
-//#define DEBUG_LEX
+#define DEBUG_LEX
 
 #ifndef DEBUG_RUN
 #define NDEBUG
@@ -258,9 +258,9 @@ static void put_str(const char *src, size_t len)
 }
 
 
-static void put_chunk(void)
+static void put_chunk(idx n)
 {
-	uint8_t buf[4] = { TOK_CHUNK, 0, 0, 0 };
+	uint8_t buf[4] = { TOK_CHUNK, 0, n >> 8, n & 0xff };
 	put_buf(buf, sizeof(buf));
 }
 
@@ -268,13 +268,6 @@ static void put_chunk(void)
 static void set_chunk_len(idx ptr, idx len)
 {
 	mem[ptr+1] = len;
-}
-
-
-static void set_chunk_line(idx ptr, idx line)
-{
-	mem[ptr+2] = line >> 8;
-	mem[ptr+3] = line & 0xff;
 }
 
 
@@ -304,14 +297,10 @@ static bool match_longest_tok(const char **pp)
 }
 
 
-static bool lex(const char *line)
+static void lex(const char *line)
 {
 	idx start = end;
 	const char *p = line;
-	bool first = true;
-	bool exec = true;
-
-	put_chunk();
 
 	for(;;) {
 
@@ -325,12 +314,7 @@ static bool lex(const char *line)
 		} else if(is_digit(*p) || *p == '.') {
 			char *pe;
 			val v = strtof(p, &pe);
-			if(first) {
-				set_chunk_line(start, v);
-				exec = false;
-			} else {
-				put_lit(v);
-			}
+			put_lit(v);
 			if(pe) p = pe - 1;
 		} else if(*p == '"') {
 			const char *ps = ++p;
@@ -355,7 +339,6 @@ static bool lex(const char *line)
 		p++;
 
 #ifdef DEBUG_LEX
-		if(first) putchar('\n');
 		printf(CSI "36m%5d | ", (int)prev);
 		size_t l = fwrite(q, 1, p-q, stdout);
 		for(;l<10; l++) putchar(' ');
@@ -364,12 +347,8 @@ static bool lex(const char *line)
 		for(i=0; i<end-prev; i++) printf("%02x ", mem[prev+i]);
 		printf(CSI "0m\n");
 #endif
-		first = false;
 	}
 
-	set_chunk_len(start, end - start);
-
-	return exec;
 }
 
 
@@ -869,18 +848,20 @@ static bool run_chunk(bool once)
 }
 
 
-static void handle_line(const char *line)
+static void handle_line(const char *buf)
 {
 	idx save = end;
 
-	bool exec = lex(line);
-
-	if(0) {
-		list_chunk();
-		cur = save;
+	idx linenum = atoi(buf);
+	if(linenum) {
+		put_chunk(linenum);
 	}
 
-	if(exec) {
+	lex(buf);
+
+	if(linenum) {
+		set_chunk_len(save, end - save);
+	} else {
 		cur = save;
 		run_chunk(false);
 		end = save;
@@ -969,14 +950,14 @@ int main(int argc, char **argv)
 {
 	srand(time(NULL));
 
-	char line[120];
+	char buf[120];
 
 	zb_register_cfuncs(cfunc_list);
 
-	while(fgets(line, sizeof(line), stdin) != NULL) {
-		char *p = strchr(line, '\n'); if(p) *p = '\0';
+	while(fgets(buf, sizeof(buf), stdin) != NULL) {
+		char *p = strchr(buf, '\n'); if(p) *p = '\0';
 		if(setjmp(jmpbuf) == 0) {
-			handle_line(line);
+			handle_line(buf);
 		} else {
 			running = false;
 		};
